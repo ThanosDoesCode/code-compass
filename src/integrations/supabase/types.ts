@@ -14,7 +14,189 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      analyses: {
+        Row: {
+          analysis_json: Json | null
+          commit_sha: string
+          context_json: Json | null
+          created_at: string
+          error_message: string | null
+          id: string
+          repository_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          analysis_json?: Json | null
+          commit_sha: string
+          context_json?: Json | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          repository_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          analysis_json?: Json | null
+          commit_sha?: string
+          context_json?: Json | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          repository_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analyses_repository_id_fkey"
+            columns: ["repository_id"]
+            isOneToOne: false
+            referencedRelation: "repositories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_messages: {
+        Row: {
+          chat_session_id: string
+          content: string
+          created_at: string
+          id: string
+          referenced_files: Json
+          role: string
+        }
+        Insert: {
+          chat_session_id: string
+          content: string
+          created_at?: string
+          id?: string
+          referenced_files?: Json
+          role: string
+        }
+        Update: {
+          chat_session_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          referenced_files?: Json
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_chat_session_id_fkey"
+            columns: ["chat_session_id"]
+            isOneToOne: false
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_sessions: {
+        Row: {
+          analysis_id: string | null
+          created_at: string
+          id: string
+          repository_id: string
+        }
+        Insert: {
+          analysis_id?: string | null
+          created_at?: string
+          id?: string
+          repository_id: string
+        }
+        Update: {
+          analysis_id?: string | null
+          created_at?: string
+          id?: string
+          repository_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_sessions_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "analyses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_sessions_repository_id_fkey"
+            columns: ["repository_id"]
+            isOneToOne: false
+            referencedRelation: "repositories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      concept_explanations: {
+        Row: {
+          analysis_id: string
+          concept_name: string
+          content: Json
+          created_at: string
+          id: string
+        }
+        Insert: {
+          analysis_id: string
+          concept_name: string
+          content: Json
+          created_at?: string
+          id?: string
+        }
+        Update: {
+          analysis_id?: string
+          concept_name?: string
+          content?: Json
+          created_at?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "concept_explanations_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "analyses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      repositories: {
+        Row: {
+          created_at: string
+          default_branch: string | null
+          github_owner: string
+          github_repo: string
+          id: string
+          latest_commit_sha: string | null
+          metadata: Json
+          repo_url: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          default_branch?: string | null
+          github_owner: string
+          github_repo: string
+          id?: string
+          latest_commit_sha?: string | null
+          metadata?: Json
+          repo_url: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          default_branch?: string | null
+          github_owner?: string
+          github_repo?: string
+          id?: string
+          latest_commit_sha?: string | null
+          metadata?: Json
+          repo_url?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
