@@ -134,7 +134,9 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
   };
   if (!summary.whatItDoes) throw new Error("Analysis is missing a project summary");
 
-  const technologies: TechnologyItem[] = ((Array.isArray(r.technologies) ? r.technologies : []) as any[])
+  const technologies: TechnologyItem[] = (
+    (Array.isArray(r.technologies) ? r.technologies : []) as any[]
+  )
     .map((t) => {
       const o = (t ?? {}) as any;
       return {
@@ -146,7 +148,9 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
     .filter((t) => t.name)
     .slice(0, 40);
 
-  const architecture: ArchitectureLayer[] = ((Array.isArray(r.architecture) ? r.architecture : []) as any[])
+  const architecture: ArchitectureLayer[] = (
+    (Array.isArray(r.architecture) ? r.architecture : []) as any[]
+  )
     .map((a, i) => {
       const o = (a ?? {}) as any;
       const name = str(o.name);
@@ -162,7 +166,9 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
     .filter((a) => a.name)
     .slice(0, 12);
 
-  const importantFiles: ImportantFile[] = ((Array.isArray(r.importantFiles) ? r.importantFiles : []) as any[])
+  const importantFiles: ImportantFile[] = (
+    (Array.isArray(r.importantFiles) ? r.importantFiles : []) as any[]
+  )
     .map((f, i) => {
       const o = (f ?? {}) as any;
       const path = str(o.path);
@@ -234,10 +240,15 @@ export function parseRepoInput(input: string): { owner: string; repo: string } |
   let candidate = raw;
   const urlMatch = raw.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/(.+)$/i);
   if (urlMatch) candidate = urlMatch[1] ?? candidate;
-  candidate = (candidate.replace(/^\/+/, "").replace(/\.git$/i, "").split(/[?#]/)[0]) ?? "";
+  candidate =
+    candidate
+      .replace(/^\/+/, "")
+      .replace(/\.git$/i, "")
+      .split(/[?#]/)[0] ?? "";
   const parts = candidate.split("/").filter(Boolean);
-  if (parts.length < 2) return null;
-  const owner = parts[0] ?? ""; const repo = parts[1] ?? "";
+  if (parts.length !== 2) return null;
+  const owner = parts[0] ?? "";
+  const repo = parts[1] ?? "";
   const ok = /^[A-Za-z0-9-_.]{1,100}$/;
   if (!ok.test(owner) || !ok.test(repo)) return null;
   return { owner, repo };

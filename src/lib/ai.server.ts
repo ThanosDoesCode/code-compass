@@ -1,7 +1,9 @@
+import Anthropic from "@anthropic-ai/sdk";
+
 import { AppError } from "./github.server";
 
-const GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
-export const CHAT_MODEL = "google/gemini-3.8-flash";
+export const CHAT_MODEL = "claude-sonnet-5";
+const MAX_OUTPUT_TOKENS = 8_192;
 
 export const SAFETY_PREAMBLE = `You are CodeCompass, a codebase onboarding guide for students and junior developers.
 
@@ -17,81 +19,107 @@ interface ChatMessage {
   content: string;
 }
 
-/** Streams the gateway response and accumulates it (avoids platform request timeouts). */
+function isContextLimitError(error: { status?: number; message: string }): boolean {
+  if (error.status === 413) return true;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("context window") ||
+    message.includes("prompt is too long") ||
+    message.includes("too many tokens") ||
+    message.includes("request too large")
+  );
+}
+
+function mapAnthropicError(error: unknown): AppError {
+  if (error instanceof Anthropic.AuthenticationError) {
+    return new AppError("ai_auth", "Anthropic rejected the configured API key.");
+  }
+  if (error instanceof Anthropic.RateLimitError) {
+    return new AppError("ai_rate_limit", "Anthropic is rate limiting requests. Try again shortly.");
+  }
+  if (error instanceof Anthropic.APIConnectionTimeoutError) {
+    return new AppError("ai_timeout", "Anthropic timed out while processing the request.");
+  }
+  if (error instanceof Anthropic.APIConnectionError) {
+    return new AppError("ai_network", "We could not reach Anthropic. Please try again.");
+  }
+  if (error instanceof Anthropic.APIError) {
+    if (isContextLimitError(error)) {
+      return new AppError(
+        "ai_context_limit",
+        "The selected repository context is too large for the AI model.",
+      );
+    }
+    if (error.status === 504) {
+      return new AppError("ai_timeout", "Anthropic timed out while processing the request.");
+    }
+    if (error.status === 529 || error.type === "overloaded_error") {
+      return new AppError(
+        "ai_overloaded",
+        "Anthropic is temporarily overloaded. Try again shortly.",
+      );
+    }
+    return new AppError("ai_error", "Anthropic returned an error. Please try again.");
+  }
+  return new AppError("ai_error", "Anthropic could not complete the request. Please try again.");
+}
+
+/** Streams Anthropic's response and returns only its text content. */
 export async function gatewayChat(
   messages: ChatMessage[],
   opts: { json?: boolean; signal?: AbortSignal } = {},
 ): Promise<string> {
-  const apiKey = process.env["LOVABLE_API_KEY"];
-  if (!apiKey) throw new AppError("ai_config", "The AI service is not configured for this app.");
+  const apiKey = process.env["ANTHROPIC_API_KEY"];
+  if (!apiKey) throw new AppError("ai_config", "Anthropic is not configured for this app.");
 
-  const body: Record<string, unknown> = {
-    model: CHAT_MODEL,
-    messages,
-    stream: true,
-  };
-  if (opts.json) body["response_format"] = { type: "json_object" };
+  const system = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n");
+  const conversation = messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({ role: message.role, content: message.content }));
 
-  let res: Response;
+  const client = new Anthropic({ apiKey, maxRetries: 2, timeout: 120_000 });
   try {
-    res = await fetch(GATEWAY, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "X-Lovable-AIG-SDK": "fetch",
+    const stream = client.messages.stream(
+      {
+        model: CHAT_MODEL,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        ...(system ? { system } : {}),
+        output_config: {
+          effort: "low",
+          ...(opts.json
+            ? {
+                format: {
+                  type: "json_schema" as const,
+                  schema: { type: "object", additionalProperties: true },
+                },
+              }
+            : {}),
+        },
+        messages: conversation,
       },
-      body: JSON.stringify(body),
-      ...(opts.signal ? { signal: opts.signal } : {}),
-    });
-  } catch {
-    throw new AppError("ai_network", "We could not reach the AI service. Please try again.");
+      opts.signal ? { signal: opts.signal } : undefined,
+    );
+    const message = await stream.finalMessage();
+    if (message.stop_reason === "max_tokens") {
+      throw new AppError(
+        "ai_context_limit",
+        "Anthropic reached the response token limit before finishing.",
+      );
+    }
+
+    const out = message.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+    if (!out.trim()) throw new AppError("ai_empty", "Anthropic returned an empty answer.");
+    return out;
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw mapAnthropicError(error);
   }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    console.error(`AI gateway error ${res.status}: ${text}`);
-    if (res.status === 429) {
-      throw new AppError("ai_rate_limit", "The AI service is busy right now. Try again shortly.");
-    }
-    if (res.status === 402) {
-      throw new AppError("ai_credits", "AI credits are exhausted. Add credits to keep analyzing.");
-    }
-    if (res.status === 403) {
-      throw new AppError("ai_blocked", "AI access is disabled for this workspace.");
-    }
-    throw new AppError("ai_error", "The AI service returned an error. Please try again.");
-  }
-
-  const reader = res.body?.getReader();
-  if (!reader) throw new AppError("ai_error", "The AI service returned an empty response.");
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let out = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) continue;
-      const payload = trimmed.slice(5).trim();
-      if (!payload || payload === "[DONE]") continue;
-      try {
-        const parsed = JSON.parse(payload);
-        const delta = parsed?.choices?.[0]?.delta?.content;
-        if (typeof delta === "string") out += delta;
-      } catch {
-        /* partial chunk, ignore */
-      }
-    }
-  }
-
-  if (!out.trim()) throw new AppError("ai_empty", "The AI service returned an empty answer.");
-  return out;
 }
 
 /** Extracts a JSON object from a model response that may be wrapped in prose or fences. */

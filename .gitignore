@@ -30,3 +30,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local environment files (keep the variable-only template tracked).
+.env
+.env.*
+!.env.example
+
+# Local design references; never ship or commit with the application.
+stitch_repocompass/

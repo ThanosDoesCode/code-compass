@@ -23,6 +23,7 @@ import {
   MANIFEST_FILES,
 } from "./github.server";
 import { SAFETY_PREAMBLE, extractJson, gatewayChat } from "./ai.server";
+import type { Json } from "@/integrations/supabase/types";
 
 /* ------------------------------- utilities -------------------------------- */
 
@@ -44,8 +45,17 @@ function fail(e: unknown): Failure {
 }
 
 async function admin() {
-  const mod = await import("@/integrations/supabase/client.server");
-  return mod.supabaseAdmin;
+  try {
+    const mod = await import("@/integrations/supabase/client.server");
+    const client = mod.supabaseAdmin;
+    void client.from; // Force lazy configuration validation inside this error boundary.
+    return client;
+  } catch {
+    throw new AppError(
+      "storage",
+      "Repository storage is not configured in this environment. Connect Supabase and try again.",
+    );
+  }
 }
 
 interface CommitInfo {
@@ -73,10 +83,31 @@ function clip(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}\n/* ...truncated by CodeCompass... */` : text;
 }
 
+/** Convert application data to Supabase's recursive JSON value type. */
+function toJson(value: unknown): Json {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(toJson);
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).flatMap(([key, entry]) =>
+        entry === undefined ? [] : [[key, toJson(entry)]],
+      ),
+    );
+  }
+  throw new TypeError(`Cannot store ${typeof value} as JSON`);
+}
+
 /* --------------------------- 1. validate / preview ------------------------- */
 
 export const previewRepository = createServerFn({ method: "POST" })
-  .inputValidator((d: { input: string }) => ({ input: String(d?.input ?? "").slice(0, 300) }))
+  .validator((d: { input: string }) => ({ input: String(d?.input ?? "").slice(0, 300) }))
   .handler(async ({ data }): Promise<Result<{ meta: RepoMeta }>> => {
     try {
       const parsed = parseRepoInput(data.input);
@@ -104,7 +135,7 @@ export interface ResolveResult {
 }
 
 export const resolveRepository = createServerFn({ method: "POST" })
-  .inputValidator((d: { input: string }) => ({ input: String(d?.input ?? "").slice(0, 300) }))
+  .validator((d: { input: string }) => ({ input: String(d?.input ?? "").slice(0, 300) }))
   .handler(async ({ data }): Promise<Result<ResolveResult>> => {
     try {
       const parsed = parseRepoInput(data.input);
@@ -133,7 +164,7 @@ export const resolveRepository = createServerFn({ method: "POST" })
             repo_url: meta.htmlUrl,
             default_branch: meta.defaultBranch,
             latest_commit_sha: commit.sha,
-            metadata: meta as unknown as Record<string, unknown>,
+            metadata: toJson(meta),
           },
           { onConflict: "github_owner,github_repo" },
         )
@@ -143,13 +174,16 @@ export const resolveRepository = createServerFn({ method: "POST" })
         throw new AppError("storage", "We could not save this repository. Please try again.");
       }
 
-      const { data: analyses } = await db
+      const { data: analyses, error: analysesError } = await db
         .from("analyses")
         .select("id, commit_sha, status, created_at")
         .eq("repository_id", repoRow.id)
         .eq("status", "complete")
         .order("created_at", { ascending: false })
         .limit(5);
+      if (analysesError) {
+        throw new AppError("storage", "We could not check for a cached analysis.");
+      }
 
       const rows = analyses ?? [];
       const current = rows.find((r) => r.commit_sha === commit.sha);
@@ -171,112 +205,118 @@ export const resolveRepository = createServerFn({ method: "POST" })
 /* --------------------------- 3. collect repo context ----------------------- */
 
 export const collectContext = createServerFn({ method: "POST" })
-  .inputValidator((d: { repositoryId: string; commitSha: string }) => ({
+  .validator((d: { repositoryId: string; commitSha: string }) => ({
     repositoryId: String(d?.repositoryId ?? ""),
     commitSha: String(d?.commitSha ?? "").slice(0, 64),
   }))
-  .handler(
-    async ({ data }): Promise<Result<{ analysisId: string; snapshot: RepoSnapshot }>> => {
-      try {
-        const db = await admin();
-        const { data: repoRow, error } = await db
-          .from("repositories")
-          .select("id, github_owner, github_repo, metadata")
-          .eq("id", data.repositoryId)
-          .single();
-        if (error || !repoRow) throw new AppError("not_found", "We lost track of that repository.");
+  .handler(async ({ data }): Promise<Result<{ analysisId: string; snapshot: RepoSnapshot }>> => {
+    try {
+      const db = await admin();
+      const { data: repoRow, error } = await db
+        .from("repositories")
+        .select("id, github_owner, github_repo, metadata")
+        .eq("id", data.repositoryId)
+        .single();
+      if (error || !repoRow) throw new AppError("not_found", "We lost track of that repository.");
 
-        const meta = repoRow.metadata as unknown as RepoMeta;
-        const owner = repoRow.github_owner;
-        const repo = repoRow.github_repo;
+      const meta = repoRow.metadata as unknown as RepoMeta;
+      const owner = repoRow.github_owner;
+      const repo = repoRow.github_repo;
 
-        const { entries, directories, truncated } = await fetchTree(owner, repo, data.commitSha);
-        if (truncated || entries.length > MAX_TREE_FILES) {
-          throw new AppError(
-            "too_large",
-            "This repository has too many files for CodeCompass to map reliably yet.",
-          );
-        }
-        if (entries.length === 0) {
-          throw new AppError("empty_repo", "This repository appears to be empty.");
-        }
-
-        const manifestPaths = entries
-          .filter((e) => isManifest(e.path) && e.path.split("/").length <= 3)
-          .sort((a, b) => {
-            const rank = (p: string) => (MANIFEST_FILES.indexOf(p.split("/").pop() ?? p) + 1) || 99;
-            return rank(a.path) - rank(b.path);
-          })
-          .slice(0, 12);
-
-        const selected = selectImportantPaths(entries, MAX_SELECTED_FILES);
-
-        const manifests: RepoContext["manifests"] = [];
-        for (const m of manifestPaths) {
-          const content = await fetchFile(owner, repo, data.commitSha, m.path);
-          if (content) manifests.push({ path: m.path, content: clip(content, MAX_MANIFEST_CHARS) });
-        }
-
-        const files: RepoContext["files"] = [];
-        for (const f of selected) {
-          const content = await fetchFile(owner, repo, data.commitSha, f.path);
-          if (content) {
-            files.push({
-              path: f.path,
-              category: "source",
-              content: clip(content, MAX_FILE_CHARS),
-            });
-          }
-        }
-
-        if (!files.length && !manifests.length) {
-          throw new AppError(
-            "unsupported",
-            "We could not find readable source files in this repository.",
-          );
-        }
-
-        const commit = await fetchLatestCommit(owner, repo, meta?.defaultBranch ?? "main");
-        const snapshot = buildSnapshot(
-          entries,
-          directories,
-          manifests.map((m) => m.path),
-          files.length,
+      const { entries, directories, truncated } = await fetchTree(owner, repo, data.commitSha);
+      if (truncated || entries.length > MAX_TREE_FILES) {
+        throw new AppError(
+          "too_large",
+          "This repository has too many files for CodeCompass to map reliably yet.",
         );
-
-        const context: RepoContext = {
-          meta,
-          commit,
-          snapshot,
-          tree: compactTree(entries, 600),
-          manifests,
-          files,
-        };
-
-        const { data: row, error: insertErr } = await db
-          .from("analyses")
-          .upsert(
-            {
-              repository_id: data.repositoryId,
-              commit_sha: data.commitSha,
-              context_json: context as unknown as Record<string, unknown>,
-              status: "collected",
-              error_message: null,
-            },
-            { onConflict: "repository_id,commit_sha" },
-          )
-          .select("id")
-          .single();
-        if (insertErr || !row) {
-          throw new AppError("storage", "We could not save the repository snapshot.");
-        }
-
-        return { ok: true, analysisId: row.id, snapshot };
-      } catch (e) {
-        return fail(e);
       }
-    },
-  );
+      if (entries.length === 0) {
+        throw new AppError("empty_repo", "This repository appears to be empty.");
+      }
+
+      const manifestPaths = entries
+        .filter((e) => isManifest(e.path) && e.path.split("/").length <= 3)
+        .sort((a, b) => {
+          const rank = (p: string) => MANIFEST_FILES.indexOf(p.split("/").pop() ?? p) + 1 || 99;
+          return rank(a.path) - rank(b.path);
+        })
+        .slice(0, 12);
+
+      const manifestPathSet = new Set(manifestPaths.map((entry) => entry.path));
+      const selected = selectImportantPaths(entries, MAX_SELECTED_FILES).filter(
+        (entry) => !manifestPathSet.has(entry.path),
+      );
+
+      const manifests = (
+        await Promise.all(
+          manifestPaths.map(async (entry) => {
+            const content = await fetchFile(owner, repo, data.commitSha, entry.path);
+            return content
+              ? { path: entry.path, content: clip(content, MAX_MANIFEST_CHARS) }
+              : null;
+          }),
+        )
+      ).filter((file): file is RepoContext["manifests"][number] => file !== null);
+
+      const files = (
+        await Promise.all(
+          selected.map(async (entry) => {
+            const content = await fetchFile(owner, repo, data.commitSha, entry.path);
+            return content
+              ? { path: entry.path, category: "source", content: clip(content, MAX_FILE_CHARS) }
+              : null;
+          }),
+        )
+      ).filter((file): file is RepoContext["files"][number] => file !== null);
+
+      if (!files.length && !manifests.length) {
+        throw new AppError(
+          "unsupported",
+          "We could not find readable source files in this repository.",
+        );
+      }
+
+      // resolveRepository already verified this exact commit immediately before collection.
+      const commit: CommitInfo = { sha: data.commitSha, message: "", date: null, author: null };
+      const snapshot = buildSnapshot(
+        entries,
+        directories,
+        manifests.map((m) => m.path),
+        files.length,
+      );
+
+      const context: RepoContext = {
+        meta,
+        commit,
+        snapshot,
+        tree: compactTree(entries, 600),
+        manifests,
+        files,
+      };
+
+      const { data: row, error: insertErr } = await db
+        .from("analyses")
+        .upsert(
+          {
+            repository_id: data.repositoryId,
+            commit_sha: data.commitSha,
+            context_json: toJson(context),
+            status: "collected",
+            error_message: null,
+          },
+          { onConflict: "repository_id,commit_sha" },
+        )
+        .select("id")
+        .single();
+      if (insertErr || !row) {
+        throw new AppError("storage", "We could not save the repository snapshot.");
+      }
+
+      return { ok: true, analysisId: row.id, snapshot };
+    } catch (e) {
+      return fail(e);
+    }
+  });
 
 /* ------------------------------ 4. run analysis ---------------------------- */
 
@@ -309,8 +349,64 @@ function contextBlock(ctx: RepoContext): string {
   return parts.join("\n");
 }
 
+function contextPaths(ctx: RepoContext): Set<string> {
+  return new Set([
+    ...ctx.tree.split("\n").filter((path) => path && !path.startsWith("... and ")),
+    ...ctx.manifests.map((file) => file.path),
+    ...ctx.files.map((file) => file.path),
+  ]);
+}
+
+/** Enforce path and connection grounding independently of model instructions. */
+function groundAnalysis(ctx: RepoContext, analysis: RepoAnalysis): RepoAnalysis {
+  const paths = contextPaths(ctx);
+  const layerIds = new Set(analysis.architecture.map((layer) => layer.id));
+  const grounded: RepoAnalysis = {
+    ...analysis,
+    architecture: analysis.architecture.map((layer) => ({
+      ...layer,
+      relatedFiles: layer.relatedFiles.filter((path) => paths.has(path)),
+      connectsTo: layer.connectsTo.filter((id) => layerIds.has(id) && id !== layer.id),
+    })),
+    importantFiles: analysis.importantFiles.filter((file) => paths.has(file.path)),
+    conceptsToLearn: analysis.conceptsToLearn.map((concept) => ({
+      ...concept,
+      relatedFiles: concept.relatedFiles.filter((path) => paths.has(path)),
+    })),
+  };
+  if (!grounded.importantFiles.length) {
+    throw new AppError("ai_malformed", "The AI analysis did not reference valid repository files.");
+  }
+  return grounded;
+}
+
+function groundConceptDetail(ctx: RepoContext, detail: ConceptDetail): ConceptDetail {
+  const files = new Map(
+    [...ctx.manifests, ...ctx.files].map((file) => [file.path, file.content] as const),
+  );
+  const codeSnippet = detail.codeSnippet;
+  return {
+    ...detail,
+    relevantFiles: detail.relevantFiles.filter((path) => files.has(path)),
+    codeSnippet:
+      codeSnippet && files.get(codeSnippet.path)?.includes(codeSnippet.code) ? codeSnippet : null,
+  };
+}
+
+function validateStoredAnalysis(ctx: RepoContext, raw: unknown): RepoAnalysis {
+  try {
+    return groundAnalysis(ctx, validateAnalysis(raw));
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError(
+      "ai_malformed",
+      "The saved analysis is malformed. Re-analyze this repository.",
+    );
+  }
+}
+
 export const runAnalysis = createServerFn({ method: "POST" })
-  .inputValidator((d: { analysisId: string }) => ({ analysisId: String(d?.analysisId ?? "") }))
+  .validator((d: { analysisId: string }) => ({ analysisId: String(d?.analysisId ?? "") }))
   .handler(async ({ data }): Promise<Result<{ analysis: RepoAnalysis }>> => {
     try {
       const db = await admin();
@@ -321,11 +417,11 @@ export const runAnalysis = createServerFn({ method: "POST" })
         .single();
       if (error || !row) throw new AppError("not_found", "That analysis no longer exists.");
 
-      if (row.status === "complete" && row.analysis_json) {
-        return { ok: true, analysis: row.analysis_json as unknown as RepoAnalysis };
-      }
       const ctx = row.context_json as unknown as RepoContext | null;
       if (!ctx) throw new AppError("no_context", "The repository snapshot is missing. Re-analyze.");
+      if (row.status === "complete" && row.analysis_json) {
+        return { ok: true, analysis: validateStoredAnalysis(ctx, row.analysis_json) };
+      }
 
       const system = `${SAFETY_PREAMBLE}
 
@@ -353,7 +449,7 @@ ${ANALYSIS_SCHEMA_TEXT}
             ],
             { json: true },
           );
-          analysis = validateAnalysis(extractJson(raw));
+          analysis = groundAnalysis(ctx, validateAnalysis(extractJson(raw)));
         } catch (err) {
           lastError = err;
           if (err instanceof AppError && err.code.startsWith("ai_") && err.code !== "ai_malformed")
@@ -374,7 +470,7 @@ ${ANALYSIS_SCHEMA_TEXT}
       const { error: saveErr } = await db
         .from("analyses")
         .update({
-          analysis_json: analysis as unknown as Record<string, unknown>,
+          analysis_json: toJson(analysis),
           status: "complete",
           error_message: null,
         })
@@ -390,7 +486,7 @@ ${ANALYSIS_SCHEMA_TEXT}
 /* ------------------------------ 5. load analysis --------------------------- */
 
 export const loadAnalysis = createServerFn({ method: "POST" })
-  .inputValidator((d: { owner: string; repo: string; checkFresh?: boolean }) => ({
+  .validator((d: { owner: string; repo: string; checkFresh?: boolean }) => ({
     owner: String(d?.owner ?? "").slice(0, 100),
     repo: String(d?.repo ?? "").slice(0, 100),
     checkFresh: Boolean(d?.checkFresh),
@@ -401,15 +497,17 @@ export const loadAnalysis = createServerFn({ method: "POST" })
     }): Promise<Result<{ record: AnalysisRecord; latestCommitSha: string | null }>> => {
       try {
         const db = await admin();
-        const { data: repoRow } = await db
+        const { data: repoRow, error: repoError } = await db
           .from("repositories")
           .select("id, github_owner, github_repo, metadata, default_branch")
           .ilike("github_owner", data.owner)
           .ilike("github_repo", data.repo)
           .maybeSingle();
-        if (!repoRow) throw new AppError("no_analysis", "This repository has not been analyzed yet.");
+        if (repoError) throw new AppError("storage", "We could not load that repository.");
+        if (!repoRow)
+          throw new AppError("no_analysis", "This repository has not been analyzed yet.");
 
-        const { data: row } = await db
+        const { data: row, error: analysisError } = await db
           .from("analyses")
           .select("id, commit_sha, analysis_json, context_json, status, created_at")
           .eq("repository_id", repoRow.id)
@@ -417,26 +515,23 @@ export const loadAnalysis = createServerFn({ method: "POST" })
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
+        if (analysisError) throw new AppError("storage", "We could not load the cached analysis.");
         if (!row?.analysis_json) {
           throw new AppError("no_analysis", "This repository has not been analyzed yet.");
         }
 
-        const ctx = row.context_json as unknown as RepoContext;
+        const ctx = row.context_json as unknown as RepoContext | null;
+        if (!ctx) throw new AppError("no_context", "The cached repository context is missing.");
+        const analysis = validateStoredAnalysis(ctx, row.analysis_json);
         const record: AnalysisRecord = {
           analysisId: row.id,
           repositoryId: repoRow.id,
           commitSha: row.commit_sha,
           status: row.status,
           cached: true,
-          meta: ctx?.meta ?? (repoRow.metadata as unknown as RepoMeta),
-          snapshot: ctx?.snapshot ?? {
-            totalFiles: 0,
-            directories: 0,
-            analyzedFiles: 0,
-            manifests: [],
-            topDirectories: [],
-          },
-          analysis: row.analysis_json as unknown as RepoAnalysis,
+          meta: ctx.meta ?? (repoRow.metadata as unknown as RepoMeta),
+          snapshot: ctx.snapshot,
+          analysis,
           createdAt: row.created_at,
         };
 
@@ -470,7 +565,7 @@ export interface ChatAnswer {
 }
 
 export const askCodebase = createServerFn({ method: "POST" })
-  .inputValidator(
+  .validator(
     (d: {
       analysisId: string;
       question: string;
@@ -487,26 +582,25 @@ export const askCodebase = createServerFn({ method: "POST" })
     try {
       if (!data.question.trim()) throw new AppError("invalid_input", "Please type a question.");
       const db = await admin();
-      const { data: row } = await db
+      const { data: row, error: rowError } = await db
         .from("analyses")
         .select("id, repository_id, context_json, analysis_json")
         .eq("id", data.analysisId)
         .maybeSingle();
+      if (rowError) throw new AppError("storage", "We could not load the repository context.");
       if (!row?.context_json) throw new AppError("no_context", "Analyze the repository first.");
 
       const ctx = row.context_json as unknown as RepoContext;
-      const availablePaths = [
-        ...ctx.manifests.map((m) => m.path),
-        ...ctx.files.map((f) => f.path),
-      ];
+      const availablePaths = [...ctx.manifests.map((m) => m.path), ...ctx.files.map((f) => f.path)];
 
       let sessionId = data.sessionId;
       if (!sessionId) {
-        const { data: session } = await db
+        const { data: session, error: sessionError } = await db
           .from("chat_sessions")
           .insert({ repository_id: row.repository_id, analysis_id: row.id })
           .select("id")
           .single();
+        if (sessionError) throw new AppError("storage", "We could not start this conversation.");
         sessionId = session?.id ?? null;
       }
       if (!sessionId) throw new AppError("storage", "We could not start this conversation.");
@@ -549,7 +643,7 @@ You answer questions about ONE repository, grounded only in the context below.
         }
       }
 
-      await db.from("chat_messages").insert([
+      const { error: messageError } = await db.from("chat_messages").insert([
         { chat_session_id: sessionId, role: "user", content: data.question },
         {
           chat_session_id: sessionId,
@@ -558,6 +652,9 @@ You answer questions about ONE repository, grounded only in the context below.
           referenced_files: referencedFiles,
         },
       ]);
+      if (messageError) {
+        throw new AppError("storage", "The answer was generated but could not be saved.");
+      }
 
       return { ok: true, answer, referencedFiles, sessionId };
     } catch (e) {
@@ -581,30 +678,33 @@ const CONCEPT_SCHEMA_TEXT = `{
 }`;
 
 export const explainConcept = createServerFn({ method: "POST" })
-  .inputValidator((d: { analysisId: string; conceptName: string }) => ({
+  .validator((d: { analysisId: string; conceptName: string }) => ({
     analysisId: String(d?.analysisId ?? ""),
     conceptName: String(d?.conceptName ?? "").slice(0, 200),
   }))
   .handler(async ({ data }): Promise<Result<{ detail: ConceptDetail }>> => {
     try {
       const db = await admin();
-      const { data: cached } = await db
+      const { data: row, error: rowError } = await db
+        .from("analyses")
+        .select("id, context_json")
+        .eq("id", data.analysisId)
+        .maybeSingle();
+      if (rowError) throw new AppError("storage", "We could not load the repository context.");
+      if (!row?.context_json) throw new AppError("no_context", "Analyze the repository first.");
+      const ctx = row.context_json as unknown as RepoContext;
+
+      const { data: cached, error: cacheError } = await db
         .from("concept_explanations")
         .select("content")
         .eq("analysis_id", data.analysisId)
         .eq("concept_name", data.conceptName)
         .maybeSingle();
+      if (cacheError) throw new AppError("storage", "We could not check the concept cache.");
       if (cached?.content) {
-        return { ok: true, detail: cached.content as unknown as ConceptDetail };
+        const detail = validateConceptDetail(cached.content, data.conceptName);
+        return { ok: true, detail: groundConceptDetail(ctx, detail) };
       }
-
-      const { data: row } = await db
-        .from("analyses")
-        .select("id, context_json")
-        .eq("id", data.analysisId)
-        .maybeSingle();
-      if (!row?.context_json) throw new AppError("no_context", "Analyze the repository first.");
-      const ctx = row.context_json as unknown as RepoContext;
 
       const system = `${SAFETY_PREAMBLE}
 
@@ -617,23 +717,46 @@ ${CONCEPT_SCHEMA_TEXT}
 
       const user = `<repository_context>\n${contextBlock(ctx)}\n</repository_context>\n\nConcept to explain: ${data.conceptName}\nProduce the JSON now.`;
 
-      const raw = await gatewayChat(
-        [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        { json: true },
-      );
-      const detail = validateConceptDetail(extractJson(raw), data.conceptName);
+      let detail: ConceptDetail | null = null;
+      for (let attempt = 0; attempt < 2 && !detail; attempt++) {
+        try {
+          const raw = await gatewayChat(
+            [
+              { role: "system", content: system },
+              { role: "user", content: user },
+            ],
+            { json: true },
+          );
+          detail = groundConceptDetail(
+            ctx,
+            validateConceptDetail(extractJson(raw), data.conceptName),
+          );
+        } catch (error) {
+          if (
+            error instanceof AppError &&
+            error.code.startsWith("ai_") &&
+            error.code !== "ai_malformed"
+          ) {
+            throw error;
+          }
+        }
+      }
+      if (!detail) {
+        throw new AppError(
+          "ai_malformed",
+          "Anthropic could not produce a grounded concept explanation. Try again shortly.",
+        );
+      }
 
-      await db.from("concept_explanations").upsert(
+      const { error: saveError } = await db.from("concept_explanations").upsert(
         {
           analysis_id: data.analysisId,
           concept_name: data.conceptName,
-          content: detail as unknown as Record<string, unknown>,
+          content: toJson(detail),
         },
         { onConflict: "analysis_id,concept_name" },
       );
+      if (saveError) throw new AppError("storage", "We could not save this concept explanation.");
 
       return { ok: true, detail };
     } catch (e) {
