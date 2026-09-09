@@ -134,7 +134,7 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
   };
   if (!summary.whatItDoes) throw new Error("Analysis is missing a project summary");
 
-  const technologies: TechnologyItem[] = (Array.isArray(r.technologies) ? r.technologies : [])
+  const technologies: TechnologyItem[] = ((Array.isArray(r.technologies) ? r.technologies : []) as any[])
     .map((t) => {
       const o = (t ?? {}) as any;
       return {
@@ -146,7 +146,7 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
     .filter((t) => t.name)
     .slice(0, 40);
 
-  const architecture: ArchitectureLayer[] = (Array.isArray(r.architecture) ? r.architecture : [])
+  const architecture: ArchitectureLayer[] = ((Array.isArray(r.architecture) ? r.architecture : []) as any[])
     .map((a, i) => {
       const o = (a ?? {}) as any;
       const name = str(o.name);
@@ -162,7 +162,7 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
     .filter((a) => a.name)
     .slice(0, 12);
 
-  const importantFiles: ImportantFile[] = (Array.isArray(r.importantFiles) ? r.importantFiles : [])
+  const importantFiles: ImportantFile[] = ((Array.isArray(r.importantFiles) ? r.importantFiles : []) as any[])
     .map((f, i) => {
       const o = (f ?? {}) as any;
       const path = str(o.path);
@@ -182,7 +182,7 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
     .slice(0, 15);
 
   const conceptsToLearn: ConceptToLearn[] = (
-    Array.isArray(r.conceptsToLearn) ? r.conceptsToLearn : []
+    (Array.isArray(r.conceptsToLearn) ? r.conceptsToLearn : []) as any[]
   )
     .map((c, i) => {
       const o = (c ?? {}) as any;

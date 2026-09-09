@@ -283,7 +283,7 @@ export function buildSnapshot(
 ): RepoSnapshot {
   const counts = new Map<string, number>();
   for (const e of entries) {
-    const top = e.path.includes("/") ? e.path.split("/")[0] : "(root)";
+    const top = (e.path.includes("/") ? e.path.split("/")[0] : "(root)") ?? "(root)";
     counts.set(top, (counts.get(top) ?? 0) + 1);
   }
   const topDirectories = [...counts.entries()]
