@@ -44,7 +44,7 @@ async function gh(path: string): Promise<Response> {
 
 export async function fetchRepoMeta(owner: string, repo: string): Promise<RepoMeta> {
   const res = await gh(`/repos/${owner}/${repo}`);
-  const d = (await res.json()) as Record<string, any>;
+  const d = (await res.json()) as any;
   if (d.private) throw new AppError("private", "This repository is private and cannot be analyzed.");
   return {
     owner: d.owner?.login ?? owner,
@@ -66,7 +66,7 @@ export async function fetchRepoMeta(owner: string, repo: string): Promise<RepoMe
 
 export async function fetchLatestCommit(owner: string, repo: string, branch: string) {
   const res = await gh(`/repos/${owner}/${repo}/commits/${encodeURIComponent(branch)}`);
-  const d = (await res.json()) as Record<string, any>;
+  const d = (await res.json()) as any;
   return {
     sha: String(d.sha ?? ""),
     message: String(d.commit?.message ?? "").slice(0, 200),
@@ -82,7 +82,7 @@ export interface TreeEntry {
 
 export async function fetchTree(owner: string, repo: string, sha: string) {
   const res = await gh(`/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`);
-  const d = (await res.json()) as Record<string, any>;
+  const d = (await res.json()) as any;
   const entries: TreeEntry[] = (Array.isArray(d.tree) ? d.tree : [])
     .filter((n: any) => n.type === "blob" && typeof n.path === "string")
     .map((n: any) => ({ path: n.path as string, size: Number(n.size ?? 0) }));

@@ -123,8 +123,8 @@ function slug(s: string, i: number) {
 /** Validates + normalizes untrusted model output into a stable shape. */
 export function validateAnalysis(raw: unknown): RepoAnalysis {
   if (!raw || typeof raw !== "object") throw new Error("Analysis response was not an object");
-  const r = raw as Record<string, unknown>;
-  const s = (r.summary ?? {}) as Record<string, unknown>;
+  const r = raw as any;
+  const s = (r.summary ?? {}) as any;
 
   const summary: AnalysisSummary = {
     whatItDoes: str(s.whatItDoes),
@@ -136,7 +136,7 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
 
   const technologies: TechnologyItem[] = (Array.isArray(r.technologies) ? r.technologies : [])
     .map((t) => {
-      const o = (t ?? {}) as Record<string, unknown>;
+      const o = (t ?? {}) as any;
       return {
         name: str(o.name),
         category: str(o.category, "Other"),
@@ -148,7 +148,7 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
 
   const architecture: ArchitectureLayer[] = (Array.isArray(r.architecture) ? r.architecture : [])
     .map((a, i) => {
-      const o = (a ?? {}) as Record<string, unknown>;
+      const o = (a ?? {}) as any;
       const name = str(o.name);
       return {
         id: str(o.id) || slug(name, i),
@@ -164,7 +164,7 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
 
   const importantFiles: ImportantFile[] = (Array.isArray(r.importantFiles) ? r.importantFiles : [])
     .map((f, i) => {
-      const o = (f ?? {}) as Record<string, unknown>;
+      const o = (f ?? {}) as any;
       const path = str(o.path);
       return {
         path,
@@ -185,7 +185,7 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
     Array.isArray(r.conceptsToLearn) ? r.conceptsToLearn : []
   )
     .map((c, i) => {
-      const o = (c ?? {}) as Record<string, unknown>;
+      const o = (c ?? {}) as any;
       return {
         name: str(o.name),
         whyItMattersHere: str(o.whyItMattersHere),
@@ -207,8 +207,8 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
 
 export function validateConceptDetail(raw: unknown, name: string): ConceptDetail {
   if (!raw || typeof raw !== "object") throw new Error("Concept response was not an object");
-  const o = raw as Record<string, unknown>;
-  const snip = (o.codeSnippet ?? null) as Record<string, unknown> | null;
+  const o = raw as any;
+  const snip = (o.codeSnippet ?? null) as any | null;
   const detail: ConceptDetail = {
     name: str(o.name, name),
     whatIsIt: str(o.whatIsIt),
@@ -233,11 +233,11 @@ export function parseRepoInput(input: string): { owner: string; repo: string } |
   if (!raw || raw.length > 300) return null;
   let candidate = raw;
   const urlMatch = raw.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/(.+)$/i);
-  if (urlMatch) candidate = urlMatch[1];
-  candidate = candidate.replace(/^\/+/, "").replace(/\.git$/i, "").split(/[?#]/)[0];
+  if (urlMatch) candidate = urlMatch[1] ?? candidate;
+  candidate = (candidate.replace(/^\/+/, "").replace(/\.git$/i, "").split(/[?#]/)[0]) ?? "";
   const parts = candidate.split("/").filter(Boolean);
   if (parts.length < 2) return null;
-  const [owner, repo] = parts;
+  const owner = parts[0] ?? ""; const repo = parts[1] ?? "";
   const ok = /^[A-Za-z0-9-_.]{1,100}$/;
   if (!ok.test(owner) || !ok.test(repo)) return null;
   return { owner, repo };
