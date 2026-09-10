@@ -1,859 +1,555 @@
-# Code Compass
+# CodeCompass
 
-Build this app using the HTML files referenced below. You can hotlink the images referenced in the HTML. The attached images are screenshots of the desired screens. Here are public links to the html of the screens which you should read and use to build the app:
+CodeCompass is a guided codebase intelligence tool for students and junior developers who feel lost when opening unfamiliar repositories.
 
-1. https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzAwMDY1YWY2OWRiNzY1MDAwM2IxYWZkNDkxMDgxMTUyEgsSBxD-jtfxpBgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzY0NTY2MDM5OTczMzA2Njc2Mw&filename=&opi=89354086
-2. https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzAwMDY1YWY2OWRkYTZkOTQwNDRmN2YzZDFkMWI0MzUyEgsSBxD-jtfxpBgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzY0NTY2MDM5OTczMzA2Njc2Mw&filename=&opi=89354086
-3. https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzAwMDY1YWY2Yjg1NTgwYzMwNGU3NDBhYWRmMTRkNzMwEgsSBxD-jtfxpBgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzY0NTY2MDM5OTczMzA2Njc2Mw&filename=&opi=89354086
-4. https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzAwMDY1YWY2YjkxYjIwNzIwNDRmN2YzZDFkMWI0MzUyEgsSBxD-jtfxpBgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzY0NTY2MDM5OTczMzA2Njc2Mw&filename=&opi=89354086
-5. https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzAwMDY1YWY2OWU2ODhhMjYwNDVhZDY5Y2RjMzA0ZGFkEgsSBxD-jtfxpBgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzY0NTY2MDM5OTczMzA2Njc2Mw&filename=&opi=89354086
-6. https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzAwMDY1YWY2OWUyZmZkZGMwNDRmN2YzZDFkMWI0MzUyEgsSBxD-jtfxpBgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzY0NTY2MDM5OTczMzA2Njc2Mw&filename=&opi=89354086
-7. https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzAwMDY1YWY2OWY2Y2ExMDgwNDVhZDcwMjNkMWQxYzg4EgsSBxD-jtfxpBgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzY0NTY2MDM5OTczMzA2Njc2Mw&filename=&opi=89354086
-8. https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzAwMDY1YWY2OTk2NmJlYzEwNDVhZGQxZmEyMGZkYjI4EgsSBxD-jtfxpBgYAZIBJAoKcHJvamVjdF9pZBIWQhQxNzY0NTY2MDM5OTczMzA2Njc2Mw&filename=&opi=89354086
+Paste a public GitHub repository and CodeCompass helps explain what the project does, how it is structured, which files matter most, what concepts appear in the codebase, and what to learn next.
 
-Build CodeCompass as a production-minded MVP using the attached Stitch screens as the visual source of truth.
+The goal is simple: make unfamiliar repositories easier to understand without requiring the user to already know what questions to ask.
 
-Do not redesign the product unless necessary for implementation.
+## Overview
 
-The product is:
+CodeCompass analyzes public GitHub repositories and turns them into a guided learning experience.
 
-A guided codebase intelligence tool for students and junior developers who feel lost when opening unfamiliar repositories.
+It combines GitHub repository data, structured AI analysis, repository-specific architecture mapping, ranked file recommendations, concept discovery, and grounded codebase chat.
 
-A user pastes a public GitHub repository URL and CodeCompass should help them understand:
+Instead of only answering questions, CodeCompass proactively guides the user through the repository.
 
-- what the project does
+## Core Features
 
-- what technologies it uses
+### Public GitHub Repository Analysis
 
-- how the main parts connect
+Users can enter either:
 
-- which files they should inspect first
+```text
+https://github.com/owner/repo
+```
 
-- which software engineering concepts they need to understand
+or:
 
-- where those concepts appear in the repository
+```text
+owner/repo
+```
 
-- what they should learn next
+CodeCompass then:
 
-- answers to questions about the codebase
+- validates the repository
+- fetches repository metadata
+- detects the default branch
+- resolves the latest commit SHA
+- reads the repository tree
+- inspects common configuration and dependency files
+- selects relevant source files
+- analyzes the repository using AI
+- stores the result for reuse
 
-CORE PRODUCT PRINCIPLE
+## Repository Overview
 
-The user should not need to already know what question to ask.
+The overview screen presents:
 
-CodeCompass should proactively guide them through the repository.
-
-TECHNICAL DIRECTION
-
-Use:
-
-- Lovable frontend
-
-- Lovable AI for repository interpretation and grounded explanations
-
-- Supabase through Lovable for persistence and caching
-
-- GitHub public repository APIs for repository data
-
-Do not require me to provide an OpenAI, Anthropic, or Gemini API key if Lovable AI can handle the AI functionality natively.
-
-Do not expose secrets in the frontend.
-
-Do not build fake functionality.
-
-The core GitHub-to-analysis flow must work end to end.
-
-CORE FLOW
-
-1. User enters a public GitHub URL or owner/repo format.
-
-2. Validate the repository.
-
-3. Fetch repository metadata.
-
-4. Get the default branch and latest commit SHA.
-
-5. Fetch the repository directory tree.
-
-6. Read important metadata/configuration files.
-
-7. Select a limited set of relevant source files.
-
-8. Send structured repository context to Lovable AI.
-
-9. Require the AI to return structured analysis data.
-
-10. Render the real analysis using the Stitch-designed dashboard.
-
-11. Store/cache the analysis in Supabase using repository identity + commit SHA.
-
-12. If the same commit is analyzed again, reuse the cached result.
-
-13. If a new commit is detected, offer re-analysis.
-
-14. Allow users to ask questions about the analyzed repository.
-
-FIRST VERSION SUPPORT
-
-Support public GitHub repositories only.
-
-Do not implement private repository OAuth yet.
-
-GITHUB DATA TO COLLECT
-
-Collect where available:
-
-- owner
-
-- repository name
-
-- repository description
-
-- repository URL
-
-- default branch
-
-- latest commit SHA
-
-- primary language
-
-- star count
-
-- README
-
-- repository file tree
-
-- dependency manifests
-
-- important configuration files
-
-- selected relevant source files
-
-LOOK FOR COMMON MANIFESTS AND CONFIG FILES
-
-Examples:
-
-package.json
-
-pnpm-workspace.yaml
-
-requirements.txt
-
-pyproject.toml
-
-Pipfile
-
-pom.xml
-
-build.gradle
-
-Cargo.toml
-
-go.mod
-
-Dockerfile
-
-docker-compose.yml
-
-README.md
-
-tsconfig.json
-
-vite.config.*
-
-next.config.*
-
-.env.example
-
-supabase/config.toml
-
-IMPORTANT FILE SELECTION
-
-Do not send the entire repository blindly to AI.
-
-Create a simple deterministic selection layer.
-
-Prioritize files such as:
-
-- application entry points
-
-- routing
-
-- authentication
-
-- API handlers
-
-- services
-
-- database clients
-
-- models
-
-- schemas
-
-- state/context
-
-- configuration
-
-- important layout/root files
-
-Prioritize directories such as:
-
-src
-
-app
-
-pages
-
-routes
-
-api
-
-server
-
-services
-
-lib
-
-contexts
-
-models
-
-controllers
-
-supabase
-
-prisma
-
-Ignore:
-
-node_modules
-
-build
-
-dist
-
-coverage
-
-generated files
-
-binary files
-
-images
-
-videos
-
-large lockfiles
-
-minified bundles
-
-very large source files when unnecessary
-
-Set sensible repository and file size limits.
-
-AI ANALYSIS
-
-Send Lovable AI:
-
-- repository metadata
-
-- README
-
-- dependency information
-
-- full directory tree or a compact representation
-
-- selected important files
-
-- file paths
-
-- detected technologies
-
-The AI should return structured JSON matching a stable schema.
-
-Use something like:
-
-{
-
-  "summary": {
-
-    "whatItDoes": "",
-
-    "whoItsFor": "",
-
-    "projectType": "",
-
-    "beginnerMentalModel": ""
-
-  },
-
-  "technologies": [
-
-    {
-
-      "name": "",
-
-      "category": "",
-
-      "roleInRepository": ""
-
-    }
-
-  ],
-
-  "architecture": [
-
-    {
-
-      "id": "",
-
-      "name": "",
-
-      "description": "",
-
-      "relatedFiles": [],
-
-      "connectsTo": []
-
-    }
-
-  ],
-
-  "importantFiles": [
-
-    {
-
-      "path": "",
-
-      "filename": "",
-
-      "category": "",
-
-      "whyItMatters": "",
-
-      "beginnerExplanation": "",
-
-      "difficulty": "beginner | intermediate | advanced",
-
-      "recommendedOrder": 1,
-
-      "concepts": []
-
-    }
-
-  ],
-
-  "conceptsToLearn": [
-
-    {
-
-      "name": "",
-
-      "whyItMattersHere": "",
-
-      "prerequisites": [],
-
-      "relatedFiles": [],
-
-      "difficulty": "beginner | intermediate | advanced",
-
-      "recommendedOrder": 1
-
-    }
-
-  ]
-
-}
-
-Validate the AI output before displaying it.
-
-If the AI response is malformed, handle it gracefully and retry or show an error state.
-
-SCREENS
-
-Implement the Stitch screens closely.
-
-SCREEN 1: LANDING / REPOSITORY INPUT
-
-Use the Stitch design.
-
-Functional requirements:
-
-- input accepts:
-
-  https://github.com/owner/repo
-
-  owner/repo
-
-- validate input
-
-- show repository preview when possible
-
-- Analyze Codebase CTA
-
-- example repositories
-
-- clear public-repository support note
-
-SCREEN 2: ANALYSIS EXPERIENCE
-
-Use real stages rather than arbitrary fake progress.
-
-Possible stages:
-
-- Validating repository
-
-- Reading repository structure
-
-- Detecting technologies
-
-- Identifying important files
-
-- Analyzing codebase
-
-- Building learning path
-
-- Saving analysis
-
-Do not claim compiler-level functionality such as full AST reconstruction unless it is actually implemented.
-
-SCREEN 3: OVERVIEW
-
-Render real data:
-
-- owner/repo
-
+- repository owner and name
 - description
-
 - primary language
-
-- stars
-
-- branch
-
-- shortened commit SHA
-
-- analysis state
-
+- star count
+- default branch
+- latest analyzed commit
 - project summary
-
 - technology stack
-
 - repository snapshot
 
-Repository snapshot should use real values where available.
+The analysis is generated from the actual repository rather than hard-coded project assumptions.
 
-SCREEN 4: ARCHITECTURE
+## Architecture View
 
-Render the architecture array returned by AI.
+CodeCompass builds a repository-specific architecture model.
 
-Show major layers and their relationships.
+Each architecture section can include:
 
-Allow selecting a layer.
-
-Selected layer should show:
-
+- layer name
 - description
-
 - related files
-
+- connected layers
 - related concepts
 
-- connected layers
+The architecture adapts to the repository being analyzed rather than assuming a specific framework or stack.
 
-Do not hard-code a React/Supabase architecture.
+## Start Here
 
-It must adapt to the analyzed repository.
+One of the main goals of CodeCompass is answering:
 
-SCREEN 5: START HERE
+> Which files should I read first?
 
-Render ranked importantFiles.
+The Start Here experience ranks important files and explains:
 
-Show:
-
-- reading order
-
-- path
-
+- recommended reading order
+- file path
 - category
-
-- why it matters
-
-- beginner explanation
-
+- why the file matters
+- beginner-friendly explanation
 - difficulty
+- related software engineering concepts
 
-- relevant concepts
+Users can also copy the path or open the file directly on GitHub.
 
-- copy path
+## Concepts to Learn
 
-- open file on GitHub
+CodeCompass detects concepts that are important for understanding the selected repository.
 
-SCREEN 6: CONCEPTS TO LEARN
+Examples may include:
 
-Render a repository-specific learning path.
+- routing
+- authentication
+- state management
+- API design
+- database access
+- dependency injection
+- asynchronous programming
+- component architecture
+- caching
 
-Each concept must explain:
+The learning path is repository-specific.
+
+Each concept can include:
 
 - what the concept is
-
-- why it matters in this repository
-
+- why it matters in the repository
 - prerequisites
-
-- relevant files
-
+- related files
 - difficulty
-
-- recommended order
-
-Include the CTA:
-
-"Learn using this codebase"
-
-SCREEN 7: CONCEPT DETAIL
-
-When selecting a concept, generate or display:
-
-- What is it?
-
-- Why does it exist?
-
-- Why does this repository use it?
-
-- Where does it appear?
-
-- Relevant files
-
-- Relevant code snippet when available
-
-- Beginner-friendly explanation
-
-- Common misconception
-
-- Simple comprehension question
-
-If this requires another Lovable AI request, implement it using stored repository context.
-
-SCREEN 8: ASK THE CODEBASE
-
-Build a functional AI chat grounded in the currently analyzed repository.
-
-Example prompts:
-
-- Where does authentication happen?
-
-- How does data move through this app?
-
-- Which file should I change to modify this feature?
-
-- Explain this file like I am a junior developer.
-
-- Why does this project use this dependency?
-
-- What should I understand before editing this component?
-
-Responses should reference relevant file paths when possible.
-
-Show cited file chips.
-
-Do not allow the model to pretend it saw files that were not included in repository context.
-
-SUPABASE
-
-Create tables appropriate for the MVP.
-
-Suggested structure:
-
-repositories
-
-- id
-
-- github_owner
-
-- github_repo
-
-- repo_url
-
-- default_branch
-
-- latest_commit_sha
-
-- metadata
-
-- created_at
-
-- updated_at
-
-analyses
-
-- id
-
-- repository_id
-
-- commit_sha
-
-- analysis_json
-
-- status
-
-- created_at
-
-- updated_at
-
-chat_sessions
-
-- id
-
-- repository_id
-
-- analysis_id
-
-- created_at
-
-chat_messages
-
-- id
-
-- chat_session_id
-
-- role
-
-- content
-
-- referenced_files
-
-- created_at
-
-Adjust schema if there is a cleaner implementation.
-
-Do not add authentication-dependent ownership fields unless needed.
-
-CACHE BEHAVIOR
-
-Before performing AI analysis:
-
-1. resolve the repository
-
-2. get latest commit SHA
-
-3. check Supabase for an analysis for that repository + commit SHA
-
-4. if found:
-
-   load cached analysis
-
-5. if not found:
-
-   perform new analysis
-
-   save the result
-
-If an older analysis exists but GitHub has a newer commit:
-
-show:
-
-"New changes detected"
-
-CTA:
-
-"Re-analyze latest version"
-
-ERROR HANDLING
-
-Implement real states for:
-
-- invalid GitHub URL
-
+- recommended learning order
+
+## Concept Detail
+
+Selecting a concept provides a deeper explanation grounded in the analyzed repository.
+
+Concept detail can include:
+
+- what the concept is
+- why it exists
+- why the repository uses it
+- where it appears
+- relevant files
+- code examples when available
+- beginner-friendly explanation
+- common misconceptions
+- comprehension questions
+
+## Ask the Codebase
+
+CodeCompass includes a grounded AI chat for asking questions about the analyzed repository.
+
+Example questions:
+
+```text
+Where does authentication happen?
+```
+
+```text
+How does data move through this app?
+```
+
+```text
+Which file should I change to modify this feature?
+```
+
+```text
+Explain this file like I am a junior developer.
+```
+
+```text
+Why does this project use this dependency?
+```
+
+Responses reference relevant repository files when possible.
+
+The model is instructed not to claim knowledge of files that were not included in the repository context.
+
+## Repository Processing
+
+CodeCompass does not blindly send an entire repository to AI.
+
+A deterministic selection layer prioritizes useful files such as:
+
+- application entry points
+- routing
+- authentication
+- API handlers
+- services
+- database clients
+- models
+- schemas
+- state management
+- configuration
+- root layouts
+
+It also prioritizes directories such as:
+
+```text
+src
+app
+pages
+routes
+api
+server
+services
+lib
+contexts
+models
+controllers
+supabase
+prisma
+```
+
+Generated and unnecessary files are excluded where possible, including:
+
+```text
+node_modules
+build
+dist
+coverage
+binary files
+images
+videos
+minified bundles
+large lockfiles
+```
+
+Repository and file-size limits are used to keep analysis focused and predictable.
+
+## GitHub Data
+
+Where available, CodeCompass collects:
+
+- repository owner
+- repository name
+- description
+- repository URL
+- default branch
+- latest commit SHA
+- primary language
+- star count
+- README
+- file tree
+- dependency manifests
+- configuration files
+- selected source files
+
+Common files detected include:
+
+```text
+package.json
+pnpm-workspace.yaml
+requirements.txt
+pyproject.toml
+Pipfile
+pom.xml
+build.gradle
+Cargo.toml
+go.mod
+Dockerfile
+docker-compose.yml
+README.md
+tsconfig.json
+vite.config.*
+next.config.*
+.env.example
+supabase/config.toml
+```
+
+## AI Analysis
+
+Repository context is sent to Lovable AI in a structured format.
+
+The AI returns structured repository analysis rather than free-form text.
+
+The output contains data for areas such as:
+
+- project summary
+- technologies
+- architecture
+- important files
+- concepts to learn
+
+AI output is validated before being displayed.
+
+Malformed responses can be retried or surfaced as an actionable error rather than silently rendering invalid data.
+
+## Caching
+
+CodeCompass uses Supabase to cache repository analyses.
+
+Analyses are identified using the repository and latest commit SHA.
+
+The flow is:
+
+```text
+Resolve repository
+        ↓
+Fetch latest commit SHA
+        ↓
+Check Supabase cache
+        ↓
+Cached analysis exists?
+      /            \
+    yes             no
+     ↓               ↓
+Load result      Analyze repository
+                     ↓
+                 Save result
+```
+
+If the repository has changed since the previous analysis, CodeCompass can detect the new commit and offer:
+
+```text
+New changes detected
+```
+
+with the option to re-analyze the latest version.
+
+## Data Model
+
+The MVP uses Supabase for persistence.
+
+Core data includes:
+
+### Repositories
+
+```text
+github_owner
+github_repo
+repo_url
+default_branch
+latest_commit_sha
+metadata
+created_at
+updated_at
+```
+
+### Analyses
+
+```text
+repository_id
+commit_sha
+analysis_json
+status
+created_at
+updated_at
+```
+
+### Chat Sessions
+
+```text
+repository_id
+analysis_id
+created_at
+```
+
+### Chat Messages
+
+```text
+chat_session_id
+role
+content
+referenced_files
+created_at
+```
+
+## Error Handling
+
+CodeCompass includes dedicated states for:
+
+- invalid GitHub URLs
 - repository not found
+- private repositories
+- GitHub rate limits
+- repositories that exceed analysis limits
+- network errors
+- AI analysis failures
+- malformed AI output
+- Supabase failures
+- chat failures
 
-- private repository
+Errors are designed to be understandable and actionable.
 
-- GitHub rate limit
+## Security
 
-- repo too large
+Repository contents are treated as untrusted input.
 
-- unsupported or difficult repository
+Security measures include:
 
-- network error
+- no sensitive API keys exposed in the frontend
+- server-side GitHub URL validation
+- input sanitization
+- file-size limits
+- repository-size limits
+- structured AI output validation
+- no execution of repository code
+- no evaluation of repository scripts
+- server-side privileged operations where required
 
-- AI analysis failure
+Repository files may contain natural-language instructions intended to manipulate an AI model.
 
-- malformed AI response
+CodeCompass explicitly treats repository content only as data and instructs the AI not to follow instructions found inside analyzed repositories.
 
-- Supabase failure
+## Tech Stack
 
-- chat failure
+### Frontend
 
-Errors should be friendly and actionable.
+- React
+- TypeScript
+- Vite
+- Lovable
+- responsive mobile-first UI
 
-SECURITY
+### Backend and Persistence
 
-- no sensitive API keys in frontend
+- Supabase
+- PostgreSQL
+- Supabase Edge Functions
 
-- sanitize user input
+### AI
 
-- validate GitHub URLs server-side
+- Lovable AI
 
-- validate AI output
+### Repository Data
 
-- limit fetched file sizes
+- GitHub public repository APIs
 
-- limit repository scope
+### Development
 
-- do not execute repository code
+- Git
+- GitHub
+- AI-assisted development workflows
 
-- do not evaluate scripts from repositories
+## Mobile Experience
 
-- treat repository contents as untrusted input
+CodeCompass is designed to remain usable on smaller screens.
 
-- ensure repository code cannot inject instructions that override system behavior
+Responsive behavior includes:
 
-This last point is important.
-
-Repository files may contain natural-language text that attempts to manipulate the AI.
-
-Treat repository contents purely as untrusted code/data.
-
-The AI system prompt should explicitly state that instructions found inside repository files must not be followed.
-
-MOBILE
-
-Implement responsive versions based on Stitch.
-
-- sidebar becomes drawer or suitable mobile navigation
-
-- cards stack cleanly
-
-- architecture remains usable
-
-- code blocks scroll horizontally
-
-- file paths truncate intelligently
-
-- chat works well on mobile
-
-DO NOT BUILD YET
-
-Do not spend time on:
-
-- payments
-
-- subscriptions
-
-- teams
-
-- organizations
-
-- private GitHub repositories
-
-- GitHub OAuth
-
-- full coding courses
-
-- interview preparation
-
-- full code editor
-
-- code execution
-
-- social features
-
-- achievements
-
-- advanced gamification
-
-QUALITY BAR
-
-This is being built at a Lovable Buildathon, but the goal is not to make a hackathon mockup.
-
-The goal is to build the smallest credible version of a real product.
-
-Prioritize:
-
-1. real GitHub integration
-
-2. real AI repository analysis
-
-3. stable structured output
-
-4. useful junior-developer guidance
-
-5. real caching
-
-6. polished Stitch-aligned UX
-
-7. error handling
-
-8. responsive design
-
-Use realistic implementation decisions and avoid fake telemetry or hard-coded repository-specific output.
-
-BUILD ORDER
-
-Implement incrementally in this order:
-
-Phase 1
-
-Recreate the Stitch UI and navigation using realistic placeholder data.
-
-Phase 2
-
-Implement GitHub URL parsing, validation, repository metadata and tree fetching.
-
-Phase 3
-
-Implement important-file selection.
-
-Phase 4
-
-Implement Lovable AI structured repository analysis.
-
-Phase 5
-
-Connect real AI results to Overview, Architecture, Start Here and Concepts.
-
-Phase 6
-
-Implement Supabase caching by repository + commit SHA.
-
-Phase 7
-
-Implement Ask the Codebase.
-
-Phase 8
-
-Implement concept detail AI explanations.
-
-Phase 9
-
-Implement errors, stale analysis/re-analysis, and production polish.
-
-Phase 10
-
-Review mobile behavior and remove any remaining mock data.
-
-Important:
-
-After each phase, preserve all existing working functionality and do not replace real implementations with mock data.
-
-This project was built with [Lovable](https://lovable.dev).
-
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/1486452a-68fb-43fd-956a-90e743c0ea23).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
+- mobile navigation
+- stacked cards
+- horizontally scrollable code blocks
+- intelligently truncated file paths
+- responsive architecture views
+- mobile-friendly repository chat
 
 ## Development
 
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+### Requirements
 
-```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
+- Node.js
+- npm
+
+Clone the repository:
+
+```bash
+git clone https://github.com/ThanosDoesCode/code-compass.git
+cd code-compass
+```
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the development server:
+
+```bash
 npm run dev
 ```
+
+## Environment Variables
+
+Environment configuration should be added locally and never committed with real secret values.
+
+Use the provided example environment files where available.
+
+Public configuration may be exposed to the frontend only when it is intentionally designed to be public.
+
+Privileged credentials should remain server-side.
+
+## Project Structure
+
+The exact structure may evolve, but the project is organized around the following areas:
+
+```text
+src/
+  components/
+  routes/
+  pages/
+  lib/
+  integrations/
+
+supabase/
+  functions/
+  migrations/
+
+public/
+
+docs/
+
+tests/
+```
+
+## Product Scope
+
+The current version focuses on the smallest credible version of the product.
+
+The MVP intentionally does not include:
+
+- private GitHub repositories
+- GitHub OAuth
+- payments
+- subscriptions
+- teams
+- organizations
+- code execution
+- full coding courses
+- interview preparation
+- social features
+- achievements
+- advanced gamification
+
+The priority is reliable repository understanding rather than adding unnecessary product surface area.
+
+## Development Priorities
+
+CodeCompass is being developed around these priorities:
+
+1. Real GitHub integration
+2. Real repository analysis
+3. Stable structured AI output
+4. Useful junior-developer guidance
+5. Repository and commit-based caching
+6. Grounded codebase chat
+7. Error handling
+8. Responsive design
+9. Removal of mock data
+10. Production-minded security
+
+## Project Status
+
+CodeCompass is actively being developed.
+
+Current focus areas include:
+
+- repository analysis quality
+- important-file selection
+- architecture explanations
+- repository-specific concept discovery
+- grounded codebase chat
+- cache reliability
+- stale commit detection
+- mobile UX
+- production hardening
+
+## Author
+
+**Thanos Xyntarakis**
+
+Computer Science student in Sweden building full-stack applications, AI tools, and real-world software projects.
+
+[GitHub](https://github.com/ThanosDoesCode)
+
+[LinkedIn](https://www.linkedin.com/in/thanosxnt)
