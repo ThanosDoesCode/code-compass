@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowRight,
   BookOpen,
   Boxes,
@@ -27,7 +28,6 @@ import {
   Send,
   Sparkles,
   Star,
-  X,
   Zap,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -57,8 +57,8 @@ const VIEWS: { id: View; label: string; icon: typeof Boxes }[] = [
   { id: "overview", label: "Overview", icon: Boxes },
   { id: "architecture", label: "Architecture", icon: Network },
   { id: "start", label: "Start Here", icon: BookOpen },
-  { id: "concepts", label: "Concepts to Learn", icon: BrainCircuit },
-  { id: "ask", label: "Ask Codebase", icon: MessageSquareText },
+  { id: "concepts", label: "Concepts", icon: BrainCircuit },
+  { id: "ask", label: "Ask", icon: MessageSquareText },
 ];
 const STAGES = [
   "Validating repository",
@@ -69,6 +69,25 @@ const STAGES = [
   "Building learning path",
   "Saving analysis",
 ];
+const STAGE_MILESTONES = [10, 25, 38, 50, 85, 95, 100] as const;
+const STAGE_STATUS = [
+  "Checking the repository details...",
+  "Reading the repository structure...",
+  "Reviewing the detected technologies...",
+  "Preparing the selected repository context...",
+  "Understanding project structure...",
+  "Organizing the repository learning path...",
+  "Saving the completed analysis...",
+] as const;
+const ANALYSIS_STATUS = [
+  "Understanding project structure...",
+  "Inspecting selected source files...",
+  "Identifying architectural boundaries...",
+  "Mapping relationships between components...",
+  "Finding the best files to read first...",
+  "Connecting repository concepts...",
+  "Building a beginner-friendly mental model...",
+] as const;
 const QUESTIONS = [
   "How does data flow through this application?",
   "Where should I start reading the code?",
@@ -251,7 +270,6 @@ function Sidebar({
             <PanelLeftClose />
           </button>
         </div>
-        <p className="eyebrow sidebar-label">Architecture core</p>
         <nav>
           {VIEWS.map((item) => {
             const Icon = item.icon;
@@ -272,19 +290,12 @@ function Sidebar({
           })}
         </nav>
         <div className="sidebar-divider" />
-        <p className="eyebrow sidebar-label">Utilities</p>
         <button type="button" className="utility-link" onClick={onSwitch}>
           <RefreshCw size={16} /> Switch repository
         </button>
         <div className="sidebar-foot">
-          <div className="tiny-status">
-            <span>Analysis engine</span>
-            <b>Ready</b>
-          </div>
-          <div className="health-bar">
-            <span />
-          </div>
-          <small>Public repositories only</small>
+          <CheckCircle2 size={14} />
+          <small>Public repositories · read-only</small>
         </div>
       </aside>
     </>
@@ -338,17 +349,15 @@ function Landing({
         </a>
       </header>
       <section className="hero">
-        <div className="hero-kicker">
-          <Sparkles size={14} /> Intelligent codebase onboarding
-        </div>
+        <div className="hero-kicker">Repository onboarding</div>
         <h1>
-          Understand any codebase
+          Understand a codebase
           <br />
-          <span>without feeling lost</span>
+          <span>before you dive in</span>
         </h1>
         <p>
-          Paste a public GitHub repository and get a grounded map of what it does, how the pieces
-          connect, where to start reading, and what to learn.
+          Paste a public GitHub repository to see what it does, how it fits together, and where to
+          start reading.
         </p>
         <form
           className="repo-form"
@@ -382,7 +391,7 @@ function Landing({
             <span>GitHub API</span>
           </div>
           <div className="examples">
-            <span>Try an open-source repository:</span>
+            <span>Examples</span>
             {examples.map((x) => (
               <button type="button" key={x} onClick={() => setInput(x)}>
                 {x}
@@ -417,25 +426,24 @@ function Landing({
       <section className="workflow">
         <div className="section-heading">
           <div>
-            <span className="eyebrow">System workflow</span>
-            <h2>How CodeCompass decodes software</h2>
+            <h2>From repository to reading plan</h2>
           </div>
         </div>
         <div className="workflow-grid">
           <article>
-            <span className="stage-tag">Stage 01</span>
+            <span className="stage-tag">1</span>
             <Search />
             <h3>Validate the repository</h3>
             <p>Confirm the public repository and inspect its latest commit before work begins.</p>
           </article>
           <article>
-            <span className="stage-tag blue">Stage 02</span>
+            <span className="stage-tag blue">2</span>
             <Network />
             <h3>Map the architecture</h3>
             <p>Read high-signal files and connect the repository’s actual layers and concepts.</p>
           </article>
           <article>
-            <span className="stage-tag amber">Stage 03</span>
+            <span className="stage-tag amber">3</span>
             <BookOpen />
             <h3>Follow a guided path</h3>
             <p>Learn from ranked files, tailored concepts, and grounded answers.</p>
@@ -459,7 +467,14 @@ function AnalysisProgress({
   onRetry: () => void;
   onCancel: () => void;
 }) {
-  const progress = Math.round(((Math.max(stage, 0) + 0.45) / STAGES.length) * 100);
+  const { progress, elapsedSeconds, status } = usePipelineProgress(stage, Boolean(error));
+  const stageNumber = Math.min(Math.max(stage, 0), STAGES.length - 1);
+  const longWaitMessage =
+    elapsedSeconds >= 60
+      ? "Still working. CodeCompass is analyzing the selected repository context."
+      : elapsedSeconds >= 30
+        ? "Large repositories can take a little longer to understand."
+        : null;
   return (
     <main className="analysis-page">
       <div className="analysis-top">
@@ -468,9 +483,9 @@ function AnalysisProgress({
           <Circle size={8} fill="currentColor" /> Engine running
         </span>
       </div>
-      <section className="analysis-card panel-glow">
+      <section className="analysis-card">
         <div>
-          <span className="eyebrow">Target repository inspection</span>
+          <span className="eyebrow">Analyzing repository</span>
           <h1>{input}</h1>
           <p>
             Building a trustworthy mental model from repository metadata and selected source files.
@@ -478,14 +493,21 @@ function AnalysisProgress({
         </div>
         <div className="progress-card">
           <div>
-            <span>Pipeline completion</span>
-            <strong>{Math.min(progress, 96)}%</strong>
+            <span>Analysis progress</span>
+            <strong>{progress}%</strong>
           </div>
-          <div className="progress-track">
-            <span style={{ width: `${Math.min(progress, 96)}%` }} />
+          <div
+            className="progress-track"
+            role="progressbar"
+            aria-label="Repository analysis progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progress}
+          >
+            <span style={{ width: `${progress}%` }} />
           </div>
           <small>
-            Stage {Math.max(1, stage + 1)} of {STAGES.length}
+            Stage {stageNumber + 1} of {STAGES.length} · {STAGES[stageNumber]}
           </small>
         </div>
       </section>
@@ -495,14 +517,16 @@ function AnalysisProgress({
         <section className="stage-list">
           <div className="section-heading">
             <h2>Analysis stages</h2>
-            <span className="eyebrow">Grounded pipeline</span>
           </div>
           {STAGES.map((name, i) => (
-            <article key={name} className={i === stage ? "current" : i < stage ? "done" : "queued"}>
+            <article
+              key={name}
+              className={i === stageNumber ? "current" : i < stageNumber ? "done" : "queued"}
+            >
               <span className="stage-state">
-                {i < stage ? (
+                {i < stageNumber ? (
                   <Check size={18} />
-                ) : i === stage ? (
+                ) : i === stageNumber ? (
                   <LoaderCircle className="spin" size={18} />
                 ) : (
                   <Circle size={18} />
@@ -511,25 +535,86 @@ function AnalysisProgress({
               <div>
                 <h3>{name}</h3>
                 <p>
-                  {i < stage
+                  {i < stageNumber
                     ? "Completed successfully"
-                    : i === stage
-                      ? "Working with the repository’s real data…"
+                    : i === stageNumber
+                      ? status
                       : "Waiting for the previous stage"}
                 </p>
+                {i === stageNumber && elapsedSeconds >= 10 && (
+                  <small className="stage-elapsed">
+                    {stageNumber === 4 ? "Analyzing" : "Working"} for {elapsedSeconds}s
+                  </small>
+                )}
+                {i === stageNumber && longWaitMessage && (
+                  <small className="long-wait-message">{longWaitMessage}</small>
+                )}
               </div>
-              <span className="stage-label">
-                {i < stage ? "Done" : i === stage ? "In progress" : "Queued"}
-              </span>
+              {i === stageNumber ? (
+                <span className="active-stage-progress" aria-hidden="true">
+                  <strong>{progress}%</strong>
+                  <span>In progress</span>
+                </span>
+              ) : (
+                <span className="stage-label">{i < stageNumber ? "Done" : "Queued"}</span>
+              )}
             </article>
           ))}
         </section>
       )}
-      <button className="cancel-button" type="button" onClick={onCancel}>
-        <X size={16} /> Return to repository input
+      <button className="analysis-back-button" type="button" onClick={onCancel}>
+        <ArrowLeft size={16} /> Back to repository input
       </button>
     </main>
   );
+}
+
+function usePipelineProgress(stage: number, paused: boolean) {
+  const safeStage = Math.min(Math.max(stage, 0), STAGES.length - 1);
+  const stageFloor = safeStage === 0 ? 0 : (STAGE_MILESTONES[safeStage - 1] ?? 0);
+  const stageMilestone = STAGE_MILESTONES[safeStage] ?? 100;
+  const stageCeiling = Math.max(stageFloor, stageMilestone - 1);
+  const [progressState, setProgressState] = useState({
+    stage: safeStage,
+    progress: stageFloor,
+    elapsedSeconds: 0,
+  });
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    setProgressState({
+      stage: safeStage,
+      progress: stageFloor,
+      elapsedSeconds: 0,
+    });
+    if (paused) return;
+
+    const update = () => {
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      const timeConstant = safeStage === 4 ? 18 : 7;
+      const eased = 1 - Math.exp(-elapsedSeconds / timeConstant);
+      const estimate = Math.floor(stageFloor + (stageCeiling - stageFloor) * eased);
+      setProgressState({
+        stage: safeStage,
+        progress: Math.min(stageCeiling, Math.max(stageFloor, estimate)),
+        elapsedSeconds,
+      });
+    };
+    update();
+    const timer = window.setInterval(update, 500);
+    return () => window.clearInterval(timer);
+  }, [paused, safeStage, stageCeiling, stageFloor]);
+
+  const elapsedSeconds = progressState.stage === safeStage ? progressState.elapsedSeconds : 0;
+  const progress =
+    progressState.stage === safeStage ? Math.max(stageFloor, progressState.progress) : stageFloor;
+  const messages = safeStage === 4 ? ANALYSIS_STATUS : STAGE_STATUS;
+  const status =
+    safeStage === 4
+      ? (messages[Math.floor(elapsedSeconds / 5) % messages.length] ?? ANALYSIS_STATUS[0])
+      : (STAGE_STATUS[safeStage] ?? STAGE_STATUS[0]);
+
+  return { progress, elapsedSeconds, status };
 }
 
 function RepoBanner({
@@ -571,12 +656,9 @@ function Overview({ record, onView }: { record: AnalysisRecord; onView: (v: View
   const { analysis, snapshot, meta } = record;
   return (
     <div className="view-stack">
-      <section className="overview-hero panel-glow">
+      <section className="overview-hero">
         <div>
-          <span className="eyebrow">
-            <Sparkles size={13} /> Junior developer plain-English digest
-          </span>
-          <h1>What this project actually does</h1>
+          <h1>What is this project?</h1>
           <p>
             <b>{meta.repo}</b> {analysis.summary.whatItDoes}
           </p>
@@ -607,35 +689,32 @@ function Overview({ record, onView }: { record: AnalysisRecord; onView: (v: View
       <section className="metrics-grid">
         <Metric
           icon={<FolderGit2 />}
-          label="Repository scale"
+          label="Files"
           value={formatNumber(snapshot.totalFiles)}
-          note={`files across ${formatNumber(snapshot.directories)} directories`}
+          note="in the repository"
         />
         <Metric
           icon={<Layers3 />}
-          label="Architecture"
-          value={analysis.architecture.length}
-          note="repository-specific layers"
+          label="Directories"
+          value={formatNumber(snapshot.directories)}
+          note="across the tree"
         />
         <Metric
           icon={<FileCode2 />}
-          label="Reading onramp"
-          value={analysis.importantFiles.length}
-          note="ranked essential files"
-        />
-        <Metric
-          icon={<BrainCircuit />}
-          label="Mental models"
-          value={analysis.conceptsToLearn.length}
-          note="concepts in learning order"
+          label="Analyzed"
+          value={formatNumber(snapshot.analyzedFiles)}
+          note="high-signal files"
         />
       </section>
       <section className="mental-model panel">
         <div className="section-heading">
           <div>
-            <span className="eyebrow">Mental model</span>
-            <h2>{analysis.summary.beginnerMentalModel || "How the repository fits together"}</h2>
+            <h2>How does it work?</h2>
+            <p>{analysis.summary.beginnerMentalModel || "How the repository fits together"}</p>
           </div>
+          <button className="quiet-button" type="button" onClick={() => onView("architecture")}>
+            Open architecture <ArrowRight size={14} />
+          </button>
         </div>
         <div className="layer-strip">
           {analysis.architecture.slice(0, 5).map((layer, i) => (
@@ -647,11 +726,29 @@ function Overview({ record, onView }: { record: AnalysisRecord; onView: (v: View
           ))}
         </div>
       </section>
+      <section className="cta-grid">
+        <button type="button" onClick={() => onView("start")}>
+          <BookOpen />
+          <span>
+            <b>Start with the essential files</b>
+            <small>See what to read first and why</small>
+          </span>
+          <ArrowRight />
+        </button>
+        <button type="button" onClick={() => onView("concepts")}>
+          <BrainCircuit />
+          <span>
+            <b>Understand the key concepts</b>
+            <small>Learn them in repository-specific order</small>
+          </span>
+          <ArrowRight />
+        </button>
+      </section>
       <section>
         <div className="section-heading">
           <div>
-            <span className="eyebrow">Ecosystem</span>
-            <h2>Technology stack and roles</h2>
+            <h2>Technology stack</h2>
+            <p>What this repository uses and the role each technology plays.</p>
           </div>
           <span>{analysis.technologies.length} technologies</span>
         </div>
@@ -667,24 +764,6 @@ function Overview({ record, onView }: { record: AnalysisRecord; onView: (v: View
             </article>
           ))}
         </div>
-      </section>
-      <section className="cta-grid">
-        <button type="button" onClick={() => onView("start")}>
-          <BookOpen />
-          <span>
-            <b>Start with the essential files</b>
-            <small>Follow the curated reading order</small>
-          </span>
-          <ArrowRight />
-        </button>
-        <button type="button" onClick={() => onView("architecture")}>
-          <Network />
-          <span>
-            <b>Explore the architecture map</b>
-            <small>Inspect how layers connect</small>
-          </span>
-          <ArrowRight />
-        </button>
       </section>
     </div>
   );
@@ -717,9 +796,9 @@ function Architecture({ layers }: { layers: ArchitectureLayer[] }) {
     <div className="architecture-layout">
       <section className="architecture-main">
         <PageHeading
-          kicker="Interactive architecture map"
+          kicker="Architecture"
           title="How the pieces connect"
-          text="Select a repository layer to inspect its responsibility, files, concepts, and connections."
+          text="Select a layer to inspect its responsibility, source files, and connections."
         />
         <div className="layer-map">
           {layers.map((layer, i) => (
@@ -736,7 +815,7 @@ function Architecture({ layers }: { layers: ArchitectureLayer[] }) {
                 </div>
                 <p>{layer.description}</p>
                 <div className="tag-row">
-                  {layer.relatedFiles.slice(0, 3).map((file) => (
+                  {layer.relatedFiles.slice(0, 2).map((file) => (
                     <span key={file} title={file}>
                       {file}
                     </span>
@@ -757,7 +836,7 @@ function Architecture({ layers }: { layers: ArchitectureLayer[] }) {
       </section>
       {selected && (
         <aside className="inspector">
-          <span className="eyebrow">Selected layer inspector</span>
+          <span className="eyebrow">Selected layer</span>
           <h2>{selected.name}</h2>
           <section>
             <h3>Why this matters</h3>
@@ -790,7 +869,7 @@ function Architecture({ layers }: { layers: ArchitectureLayer[] }) {
           </section>
           {selected.concepts?.length ? (
             <section>
-              <h3>Concepts to master</h3>
+              <h3>Related concepts</h3>
               <div className="tag-row">
                 {selected.concepts.map((x) => (
                   <span key={x}>{x}</span>
@@ -818,10 +897,10 @@ function StartHere({ record }: { record: AnalysisRecord }) {
   const files = record.analysis.importantFiles;
   return (
     <div className="view-stack">
-      <section className="page-hero panel-glow">
-        <span className="eyebrow">Curated onboarding order</span>
-        <h1>Start here: {files.length} files that explain this project</h1>
-        <p>Read these in order to move from entry points to core behavior and data boundaries.</p>
+      <section className="page-hero">
+        <span className="eyebrow">Start here</span>
+        <h1>What should I read first?</h1>
+        <p>{files.length} files, ordered from the best entry point to the core implementation.</p>
         <div className="reading-progress">
           <strong>
             {done.size} / {files.length} completed
@@ -834,8 +913,7 @@ function StartHere({ record }: { record: AnalysisRecord }) {
       <section>
         <div className="section-heading">
           <div>
-            <span className="eyebrow">Step-by-step traversal</span>
-            <h2>Essential files</h2>
+            <h2>Reading order</h2>
           </div>
           <CopyButton value={files.map((x) => x.path).join("\n")} label="Copy reading plan" />
         </div>
@@ -845,6 +923,7 @@ function StartHere({ record }: { record: AnalysisRecord }) {
               <button
                 type="button"
                 className="completion"
+                aria-label={`${done.has(file.path) ? "Mark as unread" : "Mark as read"}: ${file.path}`}
                 onClick={() =>
                   setDone((current) => {
                     const next = new Set(current);
@@ -860,20 +939,10 @@ function StartHere({ record }: { record: AnalysisRecord }) {
               <div className="file-copy">
                 <div className="file-title">
                   <h3 title={file.path}>{file.path}</h3>
-                  <span>{file.category}</span>
                   <span className={difficultyClass(file.difficulty)}>{file.difficulty}</span>
                 </div>
                 <p>{file.whyItMatters}</p>
-                <div className="beginner-note">
-                  <Sparkles size={14} />
-                  <span>{file.beginnerExplanation}</span>
-                </div>
                 <div className="file-actions">
-                  <div className="tag-row">
-                    {file.concepts.map((x) => (
-                      <span key={x}>{x}</span>
-                    ))}
-                  </div>
                   <CopyButton value={file.path} />
                   <a
                     className="quiet-button"
@@ -932,9 +1001,9 @@ function Concepts({ record }: { record: AnalysisRecord }) {
     <div className="concept-layout">
       <section className="concept-nav">
         <PageHeading
-          kicker="Curated mental graph"
-          title="Repository curriculum"
-          text="Learn concepts in dependency order, grounded in this codebase."
+          kicker="Concepts"
+          title="Learn this repository"
+          text="Concepts are ordered by dependency and grounded in the analyzed files."
         />
         <div className="concept-list">
           {concepts.map((concept) => (
@@ -948,11 +1017,9 @@ function Concepts({ record }: { record: AnalysisRecord }) {
               <div>
                 <b>{concept.name}</b>
                 <p>{concept.whyItMattersHere}</p>
-                <div className="tag-row">
+                <div className="concept-meta">
                   <span className={difficultyClass(concept.difficulty)}>{concept.difficulty}</span>
-                  {concept.prerequisites.slice(0, 1).map((x) => (
-                    <span key={x}>Prereq: {x}</span>
-                  ))}
+                  {concept.prerequisites[0] && <span>After {concept.prerequisites[0]}</span>}
                 </div>
               </div>
             </button>
@@ -978,22 +1045,34 @@ function Concepts({ record }: { record: AnalysisRecord }) {
               <p>{detail.whyThisRepoUsesIt}</p>
             </div>
             <DetailSection title="What it is" icon={<BrainCircuit />}>
-              {detail.whatIsIt}
+              <>
+                <p>{detail.whatIsIt}</p>
+                <p className="detail-support">{detail.beginnerExplanation}</p>
+              </>
             </DetailSection>
-            <DetailSection title="Why it exists" icon={<Zap />}>
-              {detail.whyDoesItExist}
-            </DetailSection>
-            <DetailSection title="Why this repository uses it" icon={<Network />}>
-              {detail.whyThisRepoUsesIt}
+            <DetailSection title="Why it matters here" icon={<Network />}>
+              <>
+                <p>{detail.whyThisRepoUsesIt}</p>
+                <p className="detail-support">{detail.whyDoesItExist}</p>
+              </>
             </DetailSection>
             <DetailSection title="Where it appears" icon={<FileCode2 />}>
               <p>{detail.whereItAppears}</p>
-              <div className="tag-row">
+              <div className="source-links">
                 {detail.relevantFiles.map((x) => (
-                  <span key={x}>{x}</span>
+                  <a
+                    key={x}
+                    href={`${record.meta.htmlUrl}/blob/${record.commitSha}/${x}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <FileCode2 size={13} /> {x} <ExternalLink size={12} />
+                  </a>
                 ))}
               </div>
-              {detail.codeSnippet && (
+            </DetailSection>
+            {detail.codeSnippet && (
+              <DetailSection title="Example from the repo" icon={<Code2 />}>
                 <div className="code-block">
                   <div>
                     <span>{detail.codeSnippet.path}</span>
@@ -1003,22 +1082,19 @@ function Concepts({ record }: { record: AnalysisRecord }) {
                     <code>{detail.codeSnippet.code}</code>
                   </pre>
                 </div>
-              )}
-            </DetailSection>
-            <DetailSection title="Plain-English version" icon={<Sparkles />}>
-              {detail.beginnerExplanation}
-            </DetailSection>
+              </DetailSection>
+            )}
             <div className="misconception">
               <AlertTriangle />
               <div>
-                <h3>Common misconception</h3>
+                <h3>Common mistake</h3>
                 <p>{detail.commonMisconception}</p>
               </div>
             </div>
             <div className="comprehension">
               <CheckCircle2 />
               <div>
-                <h3>Quick comprehension check</h3>
+                <h3>Quick check</h3>
                 <p>{detail.comprehensionQuestion}</p>
               </div>
             </div>
@@ -1098,17 +1174,20 @@ function Ask({ record }: { record: AnalysisRecord }) {
       setLoading(false);
     }
   };
-  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [messages, loading]);
+  useEffect(() => {
+    if (!messages.length && !loading) return;
+    bottom.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
   return (
     <div className="chat-layout">
       <section className="chat-main">
         <PageHeading
-          kicker="Grounded repository chat"
-          title="Ask the Codebase"
-          text="Answers use only files selected and read during analysis."
+          kicker="Ask"
+          title="Ask the codebase"
+          text="Answers are grounded in the repository files collected during analysis."
         />
         {messages.length === 0 && (
-          <div className="chat-welcome panel-glow">
+          <div className="chat-welcome">
             <span className="preview-icon">
               <BrainCircuit />
             </span>
@@ -1119,7 +1198,7 @@ function Ask({ record }: { record: AnalysisRecord }) {
               <p>
                 Ask about routes, data flow, dependencies, important files, or unfamiliar concepts.
               </p>
-              <span className="eyebrow">Starter questions</span>
+              <h3>Starter questions</h3>
               <div className="starter-questions">
                 {QUESTIONS.map((x) => (
                   <button type="button" key={x} onClick={() => void send(x)}>
@@ -1139,7 +1218,7 @@ function Ask({ record }: { record: AnalysisRecord }) {
                   "You"
                 ) : (
                   <>
-                    <Sparkles size={14} /> CodeCompass AI
+                    <Sparkles size={14} /> CodeCompass
                   </>
                 )}
               </div>

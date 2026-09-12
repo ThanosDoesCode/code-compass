@@ -353,7 +353,7 @@
   background: #15191b;
 }
 .detail-title {
-  background: radial-gradient(circle at 90% 0, #12382d, transparent 40%), #15191b;
+  background: #15191b;
 }
 .detail-title h1 {
   margin: 8px 0;
@@ -847,6 +847,24 @@
   }
   .stage-label {
     display: none;
+  }
+  .active-stage-progress {
+    min-width: 52px;
+  }
+  .active-stage-progress strong {
+    font-size: 19px;
+  }
+  .stage-list article > div {
+    min-width: 0;
+  }
+  .stage-list p,
+  .stage-elapsed,
+  .long-wait-message {
+    overflow-wrap: anywhere;
+  }
+  .analysis-back-button {
+    width: 100%;
+    justify-content: center;
   }
 }
 @media (max-width: 480px) {
