@@ -105,6 +105,21 @@ function toJson(value: unknown): Json {
   throw new TypeError(`Cannot store ${typeof value} as JSON`);
 }
 
+function randomChatCapability(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function hashChatCapability(capability: string): Promise<string> {
+  const bytes = new TextEncoder().encode(capability);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function isChatCapability(value: string): boolean {
+  return /^[a-f0-9]{64}$/.test(value);
+}
+
 /* --------------------------- 1. validate / preview ------------------------- */
 
 export const previewRepository = createServerFn({ method: "POST" })
@@ -575,7 +590,7 @@ export const askCodebase = createServerFn({ method: "POST" })
     }) => ({
       analysisId: String(d?.analysisId ?? ""),
       question: String(d?.question ?? "").slice(0, 1000),
-      sessionId: d?.sessionId ? String(d.sessionId) : null,
+      sessionId: d?.sessionId ? String(d.sessionId).slice(0, 128) : null,
       history: Array.isArray(d?.history) ? d.history.slice(-8) : [],
     }),
   )
@@ -594,17 +609,44 @@ export const askCodebase = createServerFn({ method: "POST" })
       const ctx = row.context_json as unknown as RepoContext;
       const availablePaths = [...ctx.manifests.map((m) => m.path), ...ctx.files.map((f) => f.path)];
 
-      let sessionId = data.sessionId;
-      if (!sessionId) {
+      let sessionCapability = data.sessionId;
+      let chatSessionId: string | null = null;
+      if (sessionCapability) {
+        if (!isChatCapability(sessionCapability)) {
+          throw new AppError("chat", "This conversation is no longer available. Start a new one.");
+        }
+        const accessTokenHash = await hashChatCapability(sessionCapability);
+        const { data: existingSession, error: sessionLookupError } = await db
+          .from("chat_sessions")
+          .select("id")
+          .eq("access_token_hash", accessTokenHash)
+          .eq("analysis_id", row.id)
+          .maybeSingle();
+        if (sessionLookupError) {
+          throw new AppError("storage", "We could not verify this conversation.");
+        }
+        if (!existingSession) {
+          throw new AppError("chat", "This conversation is no longer available. Start a new one.");
+        }
+        chatSessionId = existingSession.id;
+      } else {
+        sessionCapability = randomChatCapability();
+        const accessTokenHash = await hashChatCapability(sessionCapability);
         const { data: session, error: sessionError } = await db
           .from("chat_sessions")
-          .insert({ repository_id: row.repository_id, analysis_id: row.id })
+          .insert({
+            repository_id: row.repository_id,
+            analysis_id: row.id,
+            access_token_hash: accessTokenHash,
+          })
           .select("id")
           .single();
         if (sessionError) throw new AppError("storage", "We could not start this conversation.");
-        sessionId = session?.id ?? null;
+        chatSessionId = session?.id ?? null;
       }
-      if (!sessionId) throw new AppError("storage", "We could not start this conversation.");
+      if (!sessionCapability || !chatSessionId) {
+        throw new AppError("storage", "We could not start this conversation.");
+      }
 
       const system = `${SAFETY_PREAMBLE}
 
@@ -645,9 +687,9 @@ You answer questions about ONE repository, grounded only in the context below.
       }
 
       const { error: messageError } = await db.from("chat_messages").insert([
-        { chat_session_id: sessionId, role: "user", content: data.question },
+        { chat_session_id: chatSessionId, role: "user", content: data.question },
         {
-          chat_session_id: sessionId,
+          chat_session_id: chatSessionId,
           role: "assistant",
           content: answer,
           referenced_files: referencedFiles,
@@ -657,7 +699,7 @@ You answer questions about ONE repository, grounded only in the context below.
         throw new AppError("storage", "The answer was generated but could not be saved.");
       }
 
-      return { ok: true, answer, referencedFiles, sessionId };
+      return { ok: true, answer, referencedFiles, sessionId: sessionCapability };
     } catch (e) {
       return fail(e);
     }

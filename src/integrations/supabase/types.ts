@@ -95,18 +95,21 @@ export type Database = {
       }
       chat_sessions: {
         Row: {
+          access_token_hash: string
           analysis_id: string | null
           created_at: string
           id: string
           repository_id: string
         }
         Insert: {
+          access_token_hash: string
           analysis_id?: string | null
           created_at?: string
           id?: string
           repository_id: string
         }
         Update: {
+          access_token_hash?: string
           analysis_id?: string | null
           created_at?: string
           id?: string
