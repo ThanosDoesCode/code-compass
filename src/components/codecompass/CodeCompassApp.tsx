@@ -143,6 +143,17 @@ function formatNumber(value: number) {
     maximumFractionDigits: 1,
   }).format(value);
 }
+function conciseText(value: string, maxLength = 124) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  const firstSentence = normalized.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() ?? normalized;
+  if (firstSentence.length <= maxLength) return firstSentence;
+
+  const shortened = firstSentence
+    .slice(0, maxLength + 1)
+    .replace(/\s+\S*$/, "")
+    .trim();
+  return `${shortened || firstSentence.slice(0, maxLength).trim()}…`;
+}
 function difficultyClass(value: Difficulty) {
   return `difficulty difficulty-${value}`;
 }
@@ -654,138 +665,162 @@ function RepoBanner({
 
 function Overview({ record, onView }: { record: AnalysisRecord; onView: (v: View) => void }) {
   const { analysis, snapshot, meta } = record;
+  const architectureSteps = analysis.architecture.slice(0, 4);
+  const firstFiles = [...analysis.importantFiles]
+    .sort((a, b) => a.recommendedOrder - b.recommendedOrder)
+    .slice(0, 3);
+  const firstConcepts = [...analysis.conceptsToLearn]
+    .sort((a, b) => a.recommendedOrder - b.recommendedOrder)
+    .slice(0, 3);
+
   return (
-    <div className="view-stack">
-      <section className="overview-hero">
-        <div>
-          <h1>What is this project?</h1>
-          <p>
-            <b>{meta.repo}</b> {analysis.summary.whatItDoes}
-          </p>
-          <div className="tag-row">
-            <span>{analysis.summary.projectType}</span>
-            <span>{analysis.summary.whoItsFor}</span>
-          </div>
-        </div>
-        <div className="repo-facts">
-          <div>
-            <span>Primary language</span>
-            <b>{meta.language || "Mixed"}</b>
-          </div>
-          <div>
-            <span>Default branch</span>
-            <b>{meta.defaultBranch}</b>
-          </div>
-          <div>
-            <span>Commit</span>
-            <b>{shortSha(record.commitSha)}</b>
-          </div>
-          <div>
-            <span>Cache</span>
-            <b>{record.cached ? "Loaded" : "Fresh"}</b>
-          </div>
-        </div>
-      </section>
-      <section className="metrics-grid">
-        <Metric
-          icon={<FolderGit2 />}
-          label="Files"
-          value={formatNumber(snapshot.totalFiles)}
-          note="in the repository"
-        />
-        <Metric
-          icon={<Layers3 />}
-          label="Directories"
-          value={formatNumber(snapshot.directories)}
-          note="across the tree"
-        />
-        <Metric
-          icon={<FileCode2 />}
-          label="Analyzed"
-          value={formatNumber(snapshot.analyzedFiles)}
-          note="high-signal files"
-        />
-      </section>
-      <section className="mental-model panel">
-        <div className="section-heading">
-          <div>
-            <h2>How does it work?</h2>
-            <p>{analysis.summary.beginnerMentalModel || "How the repository fits together"}</p>
-          </div>
-          <button className="quiet-button" type="button" onClick={() => onView("architecture")}>
-            Open architecture <ArrowRight size={14} />
-          </button>
-        </div>
-        <div className="layer-strip">
-          {analysis.architecture.slice(0, 5).map((layer, i) => (
-            <div key={layer.id}>
-              <span>{String(i + 1).padStart(2, "0")}</span>
-              <b>{layer.name}</b>
-              <p>{layer.description}</p>
+    <div className="view-stack overview-page">
+      <section className="overview-intro" aria-labelledby="overview-project-heading">
+        <h2 id="overview-project-heading">What is this project?</h2>
+        <h1>{meta.repo}</h1>
+        <p className="overview-summary">{conciseText(analysis.summary.whatItDoes, 180)}</p>
+        <details className="technical-disclosure">
+          <summary>
+            <ChevronRight size={15} aria-hidden="true" />
+            Technical details
+          </summary>
+          <dl>
+            <div>
+              <dt>Project type</dt>
+              <dd>{analysis.summary.projectType}</dd>
             </div>
-          ))}
-        </div>
+            <div>
+              <dt>Who it is for</dt>
+              <dd>{analysis.summary.whoItsFor}</dd>
+            </div>
+            <div>
+              <dt>Technologies</dt>
+              <dd>{analysis.technologies.map((technology) => technology.name).join(", ")}</dd>
+            </div>
+          </dl>
+        </details>
       </section>
-      <section className="cta-grid">
-        <button type="button" onClick={() => onView("start")}>
-          <BookOpen />
-          <span>
-            <b>Start with the essential files</b>
-            <small>See what to read first and why</small>
-          </span>
-          <ArrowRight />
-        </button>
-        <button type="button" onClick={() => onView("concepts")}>
-          <BrainCircuit />
-          <span>
-            <b>Understand the key concepts</b>
-            <small>Learn them in repository-specific order</small>
-          </span>
-          <ArrowRight />
-        </button>
-      </section>
-      <section>
+
+      <section className="overview-section" aria-labelledby="overview-architecture-heading">
         <div className="section-heading">
           <div>
-            <h2>Technology stack</h2>
-            <p>What this repository uses and the role each technology plays.</p>
+            <h2 id="overview-architecture-heading">How does it work?</h2>
+            <p>A simple view of how the main pieces fit together.</p>
           </div>
-          <span>{analysis.technologies.length} technologies</span>
         </div>
-        <div className="tech-grid">
-          {analysis.technologies.map((tech) => (
-            <article key={`${tech.name}-${tech.category}`}>
+        {architectureSteps.length > 0 && (
+          <ol className="overview-flow">
+            {architectureSteps.map((layer, index) => (
+              <li key={layer.id}>
+                <span>{index + 1}</span>
+                <div>
+                  <strong>{layer.name}</strong>
+                  <p>{conciseText(layer.description, 96)}</p>
+                </div>
+                {index < architectureSteps.length - 1 && (
+                  <ArrowRight className="overview-flow-arrow" size={17} aria-hidden="true" />
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+        <button
+          className="overview-next-action"
+          type="button"
+          onClick={() => onView("architecture")}
+        >
+          See architecture <ArrowRight size={15} />
+        </button>
+      </section>
+
+      <section className="overview-section" aria-labelledby="overview-start-heading">
+        <div className="section-heading">
+          <div>
+            <h2 id="overview-start-heading">Start here</h2>
+            <p>Read these files first to build a useful mental model.</p>
+          </div>
+        </div>
+        <ol className="overview-reading-preview">
+          {firstFiles.map((file, index) => (
+            <li key={file.path}>
+              <span>{index + 1}</span>
               <div>
-                <Code2 size={17} />
-                <h3>{tech.name}</h3>
+                <code title={file.path}>{file.path}</code>
+                <p>{conciseText(file.whyItMatters, 130)}</p>
               </div>
-              <span>{tech.category}</span>
-              <p>{tech.roleInRepository}</p>
-            </article>
+            </li>
           ))}
+        </ol>
+        <button className="overview-next-action" type="button" onClick={() => onView("start")}>
+          Start reading <ArrowRight size={15} />
+        </button>
+      </section>
+
+      <section className="overview-section" aria-labelledby="overview-learn-heading">
+        <div className="section-heading">
+          <div>
+            <h2 id="overview-learn-heading">Learn these first</h2>
+            <p>The key ideas that will make the repository easier to understand.</p>
+          </div>
         </div>
+        <ol className="overview-concept-preview">
+          {firstConcepts.map((concept) => (
+            <li key={concept.name}>
+              <div>
+                <strong>{concept.name}</strong>
+                <span className={difficultyClass(concept.difficulty)}>{concept.difficulty}</span>
+              </div>
+              <p>{conciseText(concept.whyItMattersHere, 130)}</p>
+            </li>
+          ))}
+        </ol>
+        <button className="overview-next-action" type="button" onClick={() => onView("concepts")}>
+          Learn the key concepts <ArrowRight size={15} />
+        </button>
+      </section>
+
+      <section
+        className="overview-section project-details"
+        aria-labelledby="project-details-heading"
+      >
+        <div className="section-heading">
+          <div>
+            <h2 id="project-details-heading">Project details</h2>
+            <p>Repository and analysis information.</p>
+          </div>
+        </div>
+        <dl className="project-details-list">
+          <div>
+            <dt>Primary language</dt>
+            <dd>{meta.language || "Mixed"}</dd>
+          </div>
+          <div>
+            <dt>Default branch</dt>
+            <dd>{meta.defaultBranch}</dd>
+          </div>
+          <div>
+            <dt>Commit</dt>
+            <dd title={record.commitSha}>{shortSha(record.commitSha)}</dd>
+          </div>
+          <div>
+            <dt>Files</dt>
+            <dd>{formatNumber(snapshot.totalFiles)}</dd>
+          </div>
+          <div>
+            <dt>Directories</dt>
+            <dd>{formatNumber(snapshot.directories)}</dd>
+          </div>
+          <div>
+            <dt>Analyzed files</dt>
+            <dd>{formatNumber(snapshot.analyzedFiles)}</dd>
+          </div>
+          <div>
+            <dt>Cache status</dt>
+            <dd>{record.cached ? "Cached analysis" : "Fresh analysis"}</dd>
+          </div>
+        </dl>
       </section>
     </div>
-  );
-}
-function Metric({
-  icon,
-  label,
-  value,
-  note,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string | number;
-  note: string;
-}) {
-  return (
-    <article>
-      {icon}
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <p>{note}</p>
-    </article>
   );
 }
 
