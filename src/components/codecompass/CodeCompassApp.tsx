@@ -124,13 +124,11 @@ const ERROR_TITLES: Record<string, string> = {
   chat: "Question could not be answered",
 };
 
-function Logo({ compact = false }: { compact?: boolean }) {
+function Logo() {
   return (
-    <div className="brand">
-      <span className="brand-mark">
-        <Sparkles size={17} />
-      </span>
-      {!compact && <span>CodeCompass</span>}
+    <div className="brand" aria-label="CodeCompass">
+      <img className="brand-mark" src="/assets/codecompass-logo.png" alt="" />
+      <span aria-hidden="true">CodeCompass</span>
     </div>
   );
 }
@@ -217,13 +215,12 @@ function RepositoryHeader({
       <button type="button" className="mobile-menu" onClick={onMenu} aria-label="Open navigation">
         <Menu size={20} />
       </button>
-      <div className="topbar-brand">
-        <Logo />
-      </div>
       <button className="repo-chip" type="button" onClick={onSwitch}>
         <FolderGit2 size={15} />
-        <span>
-          {record.meta.owner} / <b>{record.meta.repo}</b>
+        <span className="repo-chip-name">
+          <span className="repo-owner">{record.meta.owner}</span>
+          <span className="repo-separator"> / </span>
+          <b>{record.meta.repo}</b>
         </span>
       </button>
       <span className="meta-chip">
@@ -260,12 +257,16 @@ function Sidebar({
   onSwitch,
   open,
   onClose,
+  collapsed,
+  onToggleCollapsed,
 }: {
   view: View;
   onView: (view: View) => void;
   onSwitch: () => void;
   open: boolean;
   onClose: () => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }) {
   return (
     <>
@@ -274,11 +275,25 @@ function Sidebar({
         onClick={onClose}
         aria-label="Close navigation"
       />
-      <aside className={`sidebar ${open ? "sidebar-open" : ""}`}>
-        <div className="drawer-heading">
+      <aside className={`sidebar ${open ? "sidebar-open" : ""} ${collapsed ? "is-collapsed" : ""}`}>
+        <div className="sidebar-heading">
           <Logo />
-          <button type="button" onClick={onClose}>
-            <PanelLeftClose />
+          <button
+            className="sidebar-collapse"
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
+          >
+            <PanelLeftClose size={18} />
+          </button>
+          <button
+            className="drawer-close"
+            type="button"
+            onClick={onClose}
+            aria-label="Close navigation"
+          >
+            <PanelLeftClose size={20} />
           </button>
         </div>
         <nav>
@@ -289,24 +304,40 @@ function Sidebar({
                 key={item.id}
                 type="button"
                 className={view === item.id ? "active" : ""}
+                aria-current={view === item.id ? "page" : undefined}
+                aria-label={collapsed ? item.label : undefined}
+                data-tooltip={item.label}
                 onClick={() => {
                   onView(item.id);
                   onClose();
                 }}
               >
                 <Icon size={17} />
-                {item.label}
+                <span className="sidebar-item-label">{item.label}</span>
               </button>
             );
           })}
         </nav>
         <div className="sidebar-divider" />
-        <button type="button" className="utility-link" onClick={onSwitch}>
-          <RefreshCw size={16} /> Switch repository
+        <button
+          type="button"
+          className="utility-link"
+          onClick={onSwitch}
+          aria-label={collapsed ? "Switch repository" : undefined}
+          data-tooltip="Switch repository"
+        >
+          <RefreshCw size={16} />
+          <span className="sidebar-item-label">Switch repository</span>
         </button>
-        <div className="sidebar-foot">
+        <div
+          className="sidebar-foot"
+          role="status"
+          tabIndex={collapsed ? 0 : -1}
+          aria-label="Public repositories only · read-only"
+          data-tooltip="Public repositories only · read-only"
+        >
           <CheckCircle2 size={14} />
-          <small>Public repositories · read-only</small>
+          <small>Public repos · read-only</small>
         </div>
       </aside>
     </>
@@ -1183,7 +1214,9 @@ function Ask({ record }: { record: AnalysisRecord }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<AppFailure | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
   const send = async (value = question) => {
     const text = value.trim();
     if (!text || loading) return;
@@ -1213,6 +1246,12 @@ function Ask({ record }: { record: AnalysisRecord }) {
     if (!messages.length && !loading) return;
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+  useEffect(() => {
+    const textarea = composer.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+  }, [question]);
   return (
     <div className="chat-layout">
       <section className="chat-main">
@@ -1293,9 +1332,11 @@ function Ask({ record }: { record: AnalysisRecord }) {
           }}
         >
           <textarea
+            ref={composer}
+            rows={1}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ask about routes, data flow, dependencies, or files…"
+            placeholder="Ask a question about this codebase…"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -1303,38 +1344,56 @@ function Ask({ record }: { record: AnalysisRecord }) {
               }
             }}
           />
-          <button className="primary-button" disabled={!question.trim() || loading}>
-            <Send size={18} />
+          <button
+            className="chat-send"
+            disabled={!question.trim() || loading}
+            aria-label={loading ? "Sending question" : "Send question"}
+          >
+            {loading ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
           </button>
-          <small>
-            Grounded in {record.snapshot.analyzedFiles} selected files · answers identify missing
-            context
-          </small>
+          <small>Grounded in {record.snapshot.analyzedFiles} analyzed files</small>
         </form>
       </section>
       <aside className="chat-context">
-        <section>
-          <span className="eyebrow">Analysis context</span>
-          <h3>{record.snapshot.totalFiles} repository files</h3>
-          <p>{record.snapshot.analyzedFiles} high-signal files were read in depth.</p>
-        </section>
-        <section>
-          <h3>Top files</h3>
-          <ul className="file-list">
-            {record.analysis.importantFiles.slice(0, 5).map((x) => (
-              <li key={x.path}>
-                <FileCode2 />
-                <span>{x.path}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section>
-          <h3>Grounding rules</h3>
-          <p>
-            CodeCompass cites only files included in the context and calls out missing evidence.
-          </p>
-        </section>
+        <button
+          className="chat-context-toggle"
+          type="button"
+          aria-expanded={contextOpen}
+          aria-controls="chat-context-content"
+          onClick={() => setContextOpen((value) => !value)}
+        >
+          Context
+          <ChevronRight size={16} />
+        </button>
+        <div id="chat-context-content" className={contextOpen ? "context-open" : ""}>
+          <section>
+            <span className="eyebrow">Analysis context</span>
+            <h3>{record.snapshot.analyzedFiles} analyzed files</h3>
+            <p>Selected from {record.snapshot.totalFiles} repository files.</p>
+          </section>
+          <section>
+            <h3>Top files</h3>
+            <ul className="file-list">
+              {record.analysis.importantFiles.slice(0, 5).map((file) => (
+                <li key={file.path}>
+                  <a
+                    href={`${record.meta.htmlUrl}/blob/${record.commitSha}/${file.path}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={file.path}
+                  >
+                    <FileCode2 />
+                    <span>{file.path}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section>
+            <h3>Grounding rules</h3>
+            <p>Answers cite only collected files and identify missing context.</p>
+          </section>
+        </div>
       </aside>
     </div>
   );
@@ -1360,6 +1419,8 @@ export function CodeCompassApp() {
   const [stale, setStale] = useState(false);
   const [latestSha, setLatestSha] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarPreferenceReady, setSidebarPreferenceReady] = useState(false);
   const setInput = (value: string) => {
     if (validationTimer.current) clearTimeout(validationTimer.current);
     setInputState(value);
@@ -1511,6 +1572,14 @@ export function CodeCompassApp() {
     },
     [],
   );
+  useEffect(() => {
+    setSidebarCollapsed(window.localStorage.getItem("codecompass-sidebar-collapsed") === "true");
+    setSidebarPreferenceReady(true);
+  }, []);
+  useEffect(() => {
+    if (!sidebarPreferenceReady) return;
+    window.localStorage.setItem("codecompass-sidebar-collapsed", String(sidebarCollapsed));
+  }, [sidebarCollapsed, sidebarPreferenceReady]);
   if (!record && !analyzing)
     return (
       <Landing
@@ -1542,7 +1611,7 @@ export function CodeCompassApp() {
     );
   if (!record) return null;
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <RepositoryHeader
         record={record}
         stale={stale}
@@ -1556,6 +1625,8 @@ export function CodeCompassApp() {
         onSwitch={reset}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
       />
       <main className="app-content">
         <RepoBanner
