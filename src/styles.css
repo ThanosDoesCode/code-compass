@@ -254,6 +254,11 @@
   opacity: 0.5;
   transform: none;
 }
+.primary-button.validation-success:disabled {
+  color: #06241a;
+  background: #72f5c8;
+  opacity: 1;
+}
 .secondary-button,
 .header-action {
   padding: 9px 12px;
@@ -525,6 +530,17 @@
   border: 1px solid #27312e;
   border-radius: 8px;
   background: #0e1113;
+  animation: repo-preview-reveal 220ms ease-out both;
+}
+@keyframes repo-preview-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .preview-icon {
   display: grid;
@@ -565,6 +581,16 @@
 }
 .preview-stats span:first-child {
   color: #ffc76a;
+}
+.preview-stats .preview-ready {
+  color: #63edbd;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .repo-preview {
+    animation: none;
+  }
 }
 .workflow {
   max-width: 1100px;

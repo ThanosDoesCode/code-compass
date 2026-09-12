@@ -10,6 +10,7 @@ import {
   type RepoMeta,
   type RepoSnapshot,
 } from "./analysis-schema";
+import { ANALYSIS_OUTPUT_SCHEMA, CONCEPT_OUTPUT_SCHEMA } from "./anthropic-schemas.server";
 import {
   AppError,
   buildSnapshot,
@@ -447,7 +448,7 @@ ${ANALYSIS_SCHEMA_TEXT}
               { role: "system", content: system },
               { role: "user", content: user },
             ],
-            { json: true },
+            { jsonSchema: ANALYSIS_OUTPUT_SCHEMA },
           );
           analysis = groundAnalysis(ctx, validateAnalysis(extractJson(raw)));
         } catch (err) {
@@ -725,7 +726,7 @@ ${CONCEPT_SCHEMA_TEXT}
               { role: "system", content: system },
               { role: "user", content: user },
             ],
-            { json: true },
+            { jsonSchema: CONCEPT_OUTPUT_SCHEMA },
           );
           detail = groundConceptDetail(
             ctx,

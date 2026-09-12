@@ -52,6 +52,7 @@ import {
 type View = "overview" | "architecture" | "start" | "concepts" | "ask";
 type AppFailure = { code: string; message: string };
 type ChatMessage = { role: "user" | "assistant"; content: string; referencedFiles?: string[] };
+type ValidationPhase = "idle" | "validating" | "found" | "ready";
 const VIEWS: { id: View; label: string; icon: typeof Boxes }[] = [
   { id: "overview", label: "Overview", icon: Boxes },
   { id: "architecture", label: "Architecture", icon: Network },
@@ -86,7 +87,9 @@ const ERROR_TITLES: Record<string, string> = {
   empty_repo: "Repository is empty",
   ai_gateway: "AI analysis failed",
   ai_config: "AI service is not configured",
-  ai_auth: "Anthropic authentication failed",
+  ai_auth: "AI configuration is invalid",
+  ai_credits: "Anthropic credits exhausted",
+  ai_request: "AI request configuration error",
   ai_network: "AI service is unavailable",
   ai_rate_limit: "AI service is busy",
   ai_timeout: "AI request timed out",
@@ -292,7 +295,7 @@ function Landing({
   input,
   setInput,
   preview,
-  busy,
+  validationPhase,
   error,
   onPreview,
   onAnalyze,
@@ -300,12 +303,31 @@ function Landing({
   input: string;
   setInput: (v: string) => void;
   preview: RepoMeta | null;
-  busy: boolean;
+  validationPhase: ValidationPhase;
   error: AppFailure | null;
   onPreview: () => void;
   onAnalyze: () => void;
 }) {
   const examples = ["facebook/react", "supabase/supabase", "vitejs/vite"];
+  const validationBusy = validationPhase === "validating" || validationPhase === "found";
+  const buttonContent =
+    validationPhase === "validating" ? (
+      <>
+        <LoaderCircle className="spin" size={18} /> Validating...
+      </>
+    ) : validationPhase === "found" ? (
+      <>
+        <Check size={18} /> Repository found
+      </>
+    ) : preview ? (
+      <>
+        <Zap size={18} /> Analyze codebase
+      </>
+    ) : (
+      <>
+        <Zap size={18} /> Validate repository
+      </>
+    );
   return (
     <main className="landing">
       <header className="landing-header">
@@ -345,9 +367,12 @@ function Landing({
               aria-label="GitHub repository"
             />
           </div>
-          <button className="primary-button" disabled={busy || !input.trim()}>
-            {busy ? <LoaderCircle className="spin" size={18} /> : <Zap size={18} />}
-            {preview ? "Analyze codebase" : "Validate repository"}
+          <button
+            className={`primary-button${validationPhase === "found" ? " validation-success" : ""}`}
+            disabled={validationBusy || !input.trim()}
+            aria-live="polite"
+          >
+            {buttonContent}
           </button>
           <div className="input-meta">
             <span>
@@ -365,7 +390,7 @@ function Landing({
             ))}
           </div>
           {preview && (
-            <div className="repo-preview">
+            <div className="repo-preview" aria-live="polite">
               <span className="preview-icon">
                 <FolderGit2 />
               </span>
@@ -380,6 +405,9 @@ function Landing({
                   <Star size={13} fill="currentColor" /> {formatNumber(preview.stars)}
                 </span>
                 <span>{preview.language || "Mixed"}</span>
+                <span className="preview-ready">
+                  <CheckCircle2 size={13} /> Ready to analyze
+                </span>
               </div>
             </div>
           )}
@@ -1208,7 +1236,8 @@ function updateRepoUrl(meta: RepoMeta, view: View) {
 export function CodeCompassApp() {
   const [input, setInputState] = useState("");
   const [preview, setPreview] = useState<RepoMeta | null>(null);
-  const [previewing, setPreviewing] = useState(false);
+  const [validationPhase, setValidationPhase] = useState<ValidationPhase>("idle");
+  const validationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [record, setRecord] = useState<AnalysisRecord | null>(null);
   const [view, setViewState] = useState<View>("overview");
   const [analyzing, setAnalyzing] = useState(false);
@@ -1218,8 +1247,10 @@ export function CodeCompassApp() {
   const [latestSha, setLatestSha] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const setInput = (value: string) => {
+    if (validationTimer.current) clearTimeout(validationTimer.current);
     setInputState(value);
     setPreview(null);
+    setValidationPhase("idle");
     setError(null);
   };
   const setView = (next: View) => {
@@ -1230,6 +1261,7 @@ export function CodeCompassApp() {
     setRecord(null);
     setAnalyzing(false);
     setPreview(null);
+    setValidationPhase("idle");
     setError(null);
     setStale(false);
     setLatestSha(null);
@@ -1238,16 +1270,22 @@ export function CodeCompassApp() {
     window.history.pushState({}, "", url);
   };
   const handlePreview = async () => {
-    setPreviewing(true);
+    if (validationTimer.current) clearTimeout(validationTimer.current);
+    setValidationPhase("validating");
     setError(null);
     try {
       const result = await previewRepository({ data: { input } });
-      if (result.ok) setPreview(result.meta);
-      else setError(result);
+      if (result.ok) {
+        setPreview(result.meta);
+        setValidationPhase("found");
+        validationTimer.current = setTimeout(() => setValidationPhase("ready"), 900);
+      } else {
+        setValidationPhase("idle");
+        setError(result);
+      }
     } catch {
+      setValidationPhase("idle");
       setError(SERVER_UNAVAILABLE);
-    } finally {
-      setPreviewing(false);
     }
   };
   const startAnalysis = async (force = false) => {
@@ -1353,13 +1391,19 @@ export function CodeCompassApp() {
       .catch(() => setError(SERVER_UNAVAILABLE))
       .finally(() => setAnalyzing(false));
   }, []);
+  useEffect(
+    () => () => {
+      if (validationTimer.current) clearTimeout(validationTimer.current);
+    },
+    [],
+  );
   if (!record && !analyzing)
     return (
       <Landing
         input={input}
         setInput={setInput}
         preview={preview}
-        busy={previewing}
+        validationPhase={validationPhase}
         error={error}
         onPreview={() => void handlePreview()}
         onAnalyze={() => void startAnalysis()}
@@ -1375,7 +1419,10 @@ export function CodeCompassApp() {
         onCancel={() => {
           setAnalyzing(false);
           setError(null);
-          if (!record) setPreview(null);
+          if (!record) {
+            setPreview(null);
+            setValidationPhase("idle");
+          }
         }}
       />
     );

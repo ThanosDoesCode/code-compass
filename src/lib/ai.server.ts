@@ -30,8 +30,32 @@ function isContextLimitError(error: { status?: number; message: string }): boole
   );
 }
 
+function safeAnthropicMessage(message: string): string {
+  return message
+    .replace(/sk-ant-[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+}
+
+function logAnthropicError(error: unknown, jsonModeRequested: boolean): void {
+  if (!(error instanceof Anthropic.APIError)) return;
+  console.error("[Anthropic] request failed", {
+    status: error.status ?? null,
+    type: error.type ?? "unknown",
+    requestId: error.requestID ?? null,
+    message: safeAnthropicMessage(error.message),
+    model: CHAT_MODEL,
+    jsonModeRequested,
+  });
+}
+
 function mapAnthropicError(error: unknown): AppError {
-  if (error instanceof Anthropic.AuthenticationError) {
+  if (
+    error instanceof Anthropic.AuthenticationError ||
+    error instanceof Anthropic.PermissionDeniedError
+  ) {
     return new AppError("ai_auth", "Anthropic rejected the configured API key.");
   }
   if (error instanceof Anthropic.RateLimitError) {
@@ -59,6 +83,23 @@ function mapAnthropicError(error: unknown): AppError {
         "Anthropic is temporarily overloaded. Try again shortly.",
       );
     }
+    if (error.status === 402 || error.type === "billing_error") {
+      return new AppError(
+        "ai_credits",
+        "The Anthropic account does not have enough credits to complete this request.",
+      );
+    }
+    if (
+      error.status === 400 ||
+      error.status === 404 ||
+      error.status === 422 ||
+      error.type === "invalid_request_error"
+    ) {
+      return new AppError(
+        "ai_request",
+        "The AI request configuration is incompatible with the provider.",
+      );
+    }
     return new AppError("ai_error", "Anthropic returned an error. Please try again.");
   }
   return new AppError("ai_error", "Anthropic could not complete the request. Please try again.");
@@ -67,7 +108,7 @@ function mapAnthropicError(error: unknown): AppError {
 /** Streams Anthropic's response and returns only its text content. */
 export async function gatewayChat(
   messages: ChatMessage[],
-  opts: { json?: boolean; signal?: AbortSignal } = {},
+  opts: { jsonSchema?: Record<string, unknown>; signal?: AbortSignal } = {},
 ): Promise<string> {
   const apiKey = process.env["ANTHROPIC_API_KEY"];
   if (!apiKey) throw new AppError("ai_config", "Anthropic is not configured for this app.");
@@ -81,6 +122,7 @@ export async function gatewayChat(
     .map((message) => ({ role: message.role, content: message.content }));
 
   const client = new Anthropic({ apiKey, maxRetries: 2, timeout: 120_000 });
+  const jsonModeRequested = Boolean(opts.jsonSchema);
   try {
     const stream = client.messages.stream(
       {
@@ -89,11 +131,11 @@ export async function gatewayChat(
         ...(system ? { system } : {}),
         output_config: {
           effort: "low",
-          ...(opts.json
+          ...(opts.jsonSchema
             ? {
                 format: {
                   type: "json_schema" as const,
-                  schema: { type: "object", additionalProperties: true },
+                  schema: opts.jsonSchema,
                 },
               }
             : {}),
@@ -118,6 +160,7 @@ export async function gatewayChat(
     return out;
   } catch (error) {
     if (error instanceof AppError) throw error;
+    logAnthropicError(error, jsonModeRequested);
     throw mapAnthropicError(error);
   }
 }
