@@ -28,6 +28,7 @@ import {
   Send,
   Sparkles,
   Star,
+  X,
   Zap,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
@@ -53,6 +54,7 @@ type View = "overview" | "architecture" | "start" | "concepts" | "ask";
 type AppFailure = { code: string; message: string };
 type ChatMessage = { role: "user" | "assistant"; content: string; referencedFiles?: string[] };
 type ValidationPhase = "idle" | "validating" | "found" | "ready";
+type AppPhase = "booting" | "idle" | "restoring" | "analyzing" | "ready";
 const VIEWS: { id: View; label: string; icon: typeof Boxes }[] = [
   { id: "overview", label: "Overview", icon: Boxes },
   { id: "architecture", label: "Architecture", icon: Network },
@@ -156,21 +158,43 @@ function difficultyClass(value: Difficulty) {
   return `difficulty difficulty-${value}`;
 }
 
-function CopyButton({ value, label = "Copy path" }: { value: string; label?: string }) {
+function CopyButton({
+  value,
+  label = "Copy path",
+  successMessage = "Copied",
+  helperText,
+}: {
+  value: string;
+  label?: string;
+  successMessage?: string;
+  helperText?: string;
+}) {
   const [copied, setCopied] = useState(false);
-  return (
+  const button = (
     <button
       className="quiet-button"
       type="button"
       onClick={async () => {
         await navigator.clipboard.writeText(value);
         setCopied(true);
-        window.setTimeout(() => setCopied(false), 1400);
+        window.setTimeout(() => setCopied(false), helperText ? 2600 : 1400);
       }}
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
       {copied ? "Copied" : label}
     </button>
+  );
+  if (!helperText) return button;
+  return (
+    <span className="copy-control">
+      {button}
+      {copied && (
+        <span className="copy-feedback" role="status">
+          <strong>{successMessage}</strong>
+          <small>{helperText}</small>
+        </span>
+      )}
+    </span>
   );
 }
 function ErrorNotice({ error, onRetry }: { error: AppFailure; onRetry?: () => void }) {
@@ -271,6 +295,7 @@ function Sidebar({
   return (
     <>
       <button
+        type="button"
         className={`drawer-backdrop ${open ? "shown" : ""}`}
         onClick={onClose}
         aria-label="Close navigation"
@@ -611,6 +636,45 @@ function AnalysisProgress({
   );
 }
 
+function RestorationState({
+  input,
+  error,
+  onReset,
+}: {
+  input: string | undefined;
+  error: AppFailure | null;
+  onReset: () => void;
+}) {
+  return (
+    <main className="restore-page">
+      <section className={`restore-state ${error ? "restore-error" : ""}`} aria-live="polite">
+        <Logo />
+        {error ? (
+          <>
+            <div className="restore-copy">
+              <span className="eyebrow">Saved analysis</span>
+              <h1>Could not load saved analysis</h1>
+              {input && <p>{input}</p>}
+            </div>
+            <ErrorNotice error={error} />
+            <button type="button" className="secondary-button" onClick={onReset}>
+              Choose another repository
+            </button>
+          </>
+        ) : (
+          <>
+            <LoaderCircle className="spin restore-spinner" size={24} aria-hidden="true" />
+            <div className="restore-copy">
+              <h1>{input ? "Loading saved analysis" : "Loading CodeCompass"}</h1>
+              {input && <p>{input}</p>}
+            </div>
+          </>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function usePipelineProgress(stage: number, paused: boolean) {
   const safeStage = Math.min(Math.max(stage, 0), STAGES.length - 1);
   const stageFloor = safeStage === 0 ? 0 : (STAGE_MILESTONES[safeStage - 1] ?? 0);
@@ -748,9 +812,6 @@ function Overview({ record, onView }: { record: AnalysisRecord; onView: (v: View
                   <strong>{layer.name}</strong>
                   <p>{conciseText(layer.description, 96)}</p>
                 </div>
-                {index < architectureSteps.length - 1 && (
-                  <ArrowRight className="overview-flow-arrow" size={17} aria-hidden="true" />
-                )}
               </li>
             ))}
           </ol>
@@ -855,9 +916,101 @@ function Overview({ record, onView }: { record: AnalysisRecord; onView: (v: View
   );
 }
 
+function ArchitectureDetails({
+  layer,
+  layers,
+  onSelectConnected,
+  showTitle = true,
+}: {
+  layer: ArchitectureLayer;
+  layers: ArchitectureLayer[];
+  onSelectConnected: (id: string) => void;
+  showTitle?: boolean;
+}) {
+  return (
+    <>
+      {showTitle && (
+        <>
+          <span className="eyebrow">Selected layer</span>
+          <h2>{layer.name}</h2>
+        </>
+      )}
+      <section>
+        <h3>Why this matters</h3>
+        <p>{layer.description}</p>
+      </section>
+      <section>
+        <h3>Connected layers</h3>
+        <div className="tag-row">
+          {layer.connectsTo.length ? (
+            layer.connectsTo.map((id) => (
+              <button type="button" key={id} onClick={() => onSelectConnected(id)}>
+                {layers.find((candidate) => candidate.id === id)?.name ?? id}
+              </button>
+            ))
+          ) : (
+            <span>Standalone boundary</span>
+          )}
+        </div>
+      </section>
+      <section>
+        <h3>Associated files</h3>
+        <ul className="file-list">
+          {layer.relatedFiles.map((file) => (
+            <li key={file}>
+              <FileCode2 />
+              <span title={file}>{file}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+      {layer.concepts?.length ? (
+        <section>
+          <h3>Related concepts</h3>
+          <div className="tag-row">
+            {layer.concepts.map((concept) => (
+              <span key={concept}>{concept}</span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
 function Architecture({ layers }: { layers: ArchitectureLayer[] }) {
   const [selectedId, setSelectedId] = useState(layers[0]?.id ?? "");
-  const selected = layers.find((x) => x.id === selectedId) ?? layers[0];
+  const layerRefs = useRef(new Map<string, HTMLDivElement>());
+  const selected = layers.find((x) => x.id === selectedId);
+  useEffect(() => {
+    const desktopQuery = window.matchMedia("(min-width: 769px)");
+    const restoreDesktopSelection = (event: MediaQueryListEvent) => {
+      if (event.matches) setSelectedId((current) => current || layers[0]?.id || "");
+    };
+    desktopQuery.addEventListener("change", restoreDesktopSelection);
+    return () => desktopQuery.removeEventListener("change", restoreDesktopSelection);
+  }, [layers]);
+  const selectLayer = (id: string) => {
+    if (window.matchMedia("(max-width: 768px)").matches) {
+      setSelectedId((current) => (current === id ? "" : id));
+      return;
+    }
+    setSelectedId(id);
+  };
+  const selectConnectedLayer = (id: string) => {
+    if (!layers.some((layer) => layer.id === id)) return;
+    setSelectedId(id);
+    if (!window.matchMedia("(max-width: 768px)").matches) return;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const target = layerRefs.current.get(id);
+        if (!target) return;
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "nearest" });
+        target.querySelector<HTMLButtonElement>(".layer-node")?.focus({ preventScroll: true });
+      });
+    });
+  };
   return (
     <div className="architecture-layout">
       <section className="architecture-main">
@@ -868,11 +1021,20 @@ function Architecture({ layers }: { layers: ArchitectureLayer[] }) {
         />
         <div className="layer-map">
           {layers.map((layer, i) => (
-            <div key={layer.id} className="layer-node-wrap">
+            <div
+              key={layer.id}
+              className="layer-node-wrap"
+              ref={(element) => {
+                if (element) layerRefs.current.set(layer.id, element);
+                else layerRefs.current.delete(layer.id);
+              }}
+            >
               <button
                 type="button"
                 className={`layer-node ${selected?.id === layer.id ? "selected" : ""}`}
-                onClick={() => setSelectedId(layer.id)}
+                aria-expanded={selected?.id === layer.id}
+                aria-controls={`mobile-layer-details-${layer.id}`}
+                onClick={() => selectLayer(layer.id)}
               >
                 <span className="layer-number">Layer {String(i + 1).padStart(2, "0")}</span>
                 <div>
@@ -889,6 +1051,20 @@ function Architecture({ layers }: { layers: ArchitectureLayer[] }) {
                 </div>
                 <ChevronRight />
               </button>
+              {selected?.id === layer.id && (
+                <div
+                  className="mobile-layer-details"
+                  id={`mobile-layer-details-${layer.id}`}
+                  aria-label={`${layer.name} details`}
+                >
+                  <ArchitectureDetails
+                    layer={layer}
+                    layers={layers}
+                    onSelectConnected={selectConnectedLayer}
+                    showTitle={false}
+                  />
+                </div>
+              )}
               {i < layers.length - 1 &&
                 (layer.connectsTo.includes(layers[i + 1]?.id ?? "") ||
                   layers[i + 1]?.connectsTo.includes(layer.id)) && (
@@ -901,48 +1077,12 @@ function Architecture({ layers }: { layers: ArchitectureLayer[] }) {
         </div>
       </section>
       {selected && (
-        <aside className="inspector">
-          <span className="eyebrow">Selected layer</span>
-          <h2>{selected.name}</h2>
-          <section>
-            <h3>Why this matters</h3>
-            <p>{selected.description}</p>
-          </section>
-          <section>
-            <h3>Connected layers</h3>
-            <div className="tag-row">
-              {selected.connectsTo.length ? (
-                selected.connectsTo.map((id) => (
-                  <button type="button" key={id} onClick={() => setSelectedId(id)}>
-                    {layers.find((l) => l.id === id)?.name ?? id}
-                  </button>
-                ))
-              ) : (
-                <span>Standalone boundary</span>
-              )}
-            </div>
-          </section>
-          <section>
-            <h3>Associated files</h3>
-            <ul className="file-list">
-              {selected.relatedFiles.map((file) => (
-                <li key={file}>
-                  <FileCode2 />
-                  <span title={file}>{file}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-          {selected.concepts?.length ? (
-            <section>
-              <h3>Related concepts</h3>
-              <div className="tag-row">
-                {selected.concepts.map((x) => (
-                  <span key={x}>{x}</span>
-                ))}
-              </div>
-            </section>
-          ) : null}
+        <aside className="inspector desktop-architecture-inspector">
+          <ArchitectureDetails
+            layer={selected}
+            layers={layers}
+            onSelectConnected={selectConnectedLayer}
+          />
         </aside>
       )}
     </div>
@@ -956,6 +1096,17 @@ function PageHeading({ kicker, title, text }: { kicker: string; title: string; t
       <p>{text}</p>
     </div>
   );
+}
+
+function fileReadingHint(file: AnalysisRecord["analysis"]["importantFiles"][number]) {
+  if (file.beginnerExplanation.trim()) return conciseText(file.beginnerExplanation, 156);
+  if (file.concepts.length) {
+    return `Look for how this file connects ${file.concepts.slice(0, 3).join(", ")}.`;
+  }
+  if (file.category.trim()) {
+    return `Notice the ${file.category.toLowerCase()} responsibilities this file brings together.`;
+  }
+  return conciseText(file.whyItMatters, 156);
 }
 
 function StartHere({ record }: { record: AnalysisRecord }) {
@@ -986,39 +1137,56 @@ function StartHere({ record }: { record: AnalysisRecord }) {
         <div className="reading-list">
           {files.map((file) => (
             <article key={file.path} className={done.has(file.path) ? "file-done" : ""}>
-              <button
-                type="button"
-                className="completion"
-                aria-label={`${done.has(file.path) ? "Mark as unread" : "Mark as read"}: ${file.path}`}
-                onClick={() =>
-                  setDone((current) => {
-                    const next = new Set(current);
-                    if (next.has(file.path)) next.delete(file.path);
-                    else next.add(file.path);
-                    return next;
-                  })
-                }
-              >
-                {done.has(file.path) ? <Check /> : <Circle />}
-              </button>
               <span className="file-rank">{String(file.recommendedOrder).padStart(2, "0")}</span>
               <div className="file-copy">
                 <div className="file-title">
                   <h3 title={file.path}>{file.path}</h3>
                   <span className={difficultyClass(file.difficulty)}>{file.difficulty}</span>
                 </div>
-                <p>{file.whyItMatters}</p>
+                <div className="file-guidance">
+                  <section>
+                    <h4>Why read this?</h4>
+                    <p>{conciseText(file.whyItMatters, 156)}</p>
+                  </section>
+                  <section>
+                    <h4>What to look for</h4>
+                    <p>{fileReadingHint(file)}</p>
+                  </section>
+                </div>
                 <div className="file-actions">
-                  <CopyButton value={file.path} />
                   <a
                     className="quiet-button"
                     href={`${record.meta.htmlUrl}/blob/${record.commitSha}/${file.path}`}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
+                    aria-label={`View ${file.path} on GitHub`}
                   >
                     <ExternalLink size={14} />
-                    GitHub
+                    View on GitHub
                   </a>
+                  <CopyButton
+                    value={file.path}
+                    label="Copy file path"
+                    successMessage="File path copied"
+                    helperText="Paste it into your editor's Quick Open or repository search."
+                  />
+                  <button
+                    type="button"
+                    className="completion"
+                    aria-pressed={done.has(file.path)}
+                    aria-label={`${done.has(file.path) ? "Mark as incomplete" : "Mark complete"}: ${file.path}`}
+                    onClick={() =>
+                      setDone((current) => {
+                        const next = new Set(current);
+                        if (next.has(file.path)) next.delete(file.path);
+                        else next.add(file.path);
+                        return next;
+                      })
+                    }
+                  >
+                    {done.has(file.path) ? <Check size={14} /> : <Circle size={14} />}
+                    {done.has(file.path) ? "Completed" : "Mark complete"}
+                  </button>
                 </div>
               </div>
             </article>
@@ -1035,7 +1203,11 @@ function Concepts({ record }: { record: AnalysisRecord }) {
   const [detail, setDetail] = useState<ConceptDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<AppFailure | null>(null);
+  const [selectorOpen, setSelectorOpen] = useState(false);
   const requestId = useRef(0);
+  const selectorTrigger = useRef<HTMLButtonElement>(null);
+  const selectorClose = useRef<HTMLButtonElement>(null);
+  const selectorSheet = useRef<HTMLDivElement>(null);
   const load = useCallback(
     async (concept: ConceptToLearn) => {
       const currentRequest = ++requestId.current;
@@ -1063,6 +1235,54 @@ function Concepts({ record }: { record: AnalysisRecord }) {
     if (initial) void load(initial);
   }, [concepts, load]);
   const selected = concepts.find((x) => x.name === selectedName) ?? concepts[0];
+  const selectedIndex = selected
+    ? concepts.findIndex((concept) => concept.name === selected.name)
+    : 0;
+  const selectConcept = (concept: ConceptToLearn) => {
+    setSelectorOpen(false);
+    if (concept.name !== selectedName) void load(concept);
+  };
+  useEffect(() => {
+    if (!selectorOpen) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const trigger = selectorTrigger.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => selectorClose.current?.focus());
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectorOpen(false);
+    };
+    const desktopQuery = window.matchMedia("(min-width: 769px)");
+    const closeOnDesktop = (event: MediaQueryListEvent) => {
+      if (event.matches) setSelectorOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    desktopQuery.addEventListener("change", closeOnDesktop);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", closeOnEscape);
+      desktopQuery.removeEventListener("change", closeOnDesktop);
+      document.body.style.overflow = previousOverflow;
+      if (trigger?.getClientRects().length) trigger.focus();
+      else previouslyFocused?.focus();
+    };
+  }, [selectorOpen]);
+  const trapSelectorFocus = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Tab") return;
+    const buttons = Array.from(
+      selectorSheet.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [],
+    );
+    const first = buttons[0];
+    const last = buttons.at(-1);
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
   return (
     <div className="concept-layout">
       <section className="concept-nav">
@@ -1071,6 +1291,47 @@ function Concepts({ record }: { record: AnalysisRecord }) {
           title="Learn this repository"
           text="Concepts are ordered by dependency and grounded in the analyzed files."
         />
+        {selected && (
+          <div className="mobile-concept-navigation" aria-label="Concept navigation">
+            <span>
+              Concept {selectedIndex + 1} of {concepts.length}
+            </span>
+            <h2>{selected.name}</h2>
+            <div className="mobile-concept-actions">
+              <button
+                type="button"
+                disabled={selectedIndex <= 0}
+                onClick={() => {
+                  const previous = concepts[selectedIndex - 1];
+                  if (previous) void load(previous);
+                }}
+              >
+                <ArrowLeft size={16} /> Previous
+              </button>
+              <button
+                type="button"
+                disabled={selectedIndex >= concepts.length - 1}
+                onClick={() => {
+                  const next = concepts[selectedIndex + 1];
+                  if (next) void load(next);
+                }}
+              >
+                Next <ArrowRight size={16} />
+              </button>
+            </div>
+            <button
+              ref={selectorTrigger}
+              className="all-concepts-button"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={selectorOpen}
+              onClick={() => setSelectorOpen(true)}
+            >
+              All concepts
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        )}
         <div className="concept-list">
           {concepts.map((concept) => (
             <button
@@ -1092,6 +1353,62 @@ function Concepts({ record }: { record: AnalysisRecord }) {
           ))}
         </div>
       </section>
+      {selectorOpen && (
+        <div className="concept-selector-overlay">
+          <button
+            className="concept-selector-backdrop"
+            type="button"
+            aria-label="Close concept selector"
+            onClick={() => setSelectorOpen(false)}
+          />
+          <div
+            ref={selectorSheet}
+            className="concept-selector-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="concept-selector-title"
+            onKeyDown={trapSelectorFocus}
+          >
+            <div className="concept-selector-heading">
+              <div>
+                <span>Learning path</span>
+                <h2 id="concept-selector-title">All concepts</h2>
+              </div>
+              <button
+                ref={selectorClose}
+                type="button"
+                aria-label="Close concept selector"
+                onClick={() => setSelectorOpen(false)}
+              >
+                <X size={19} />
+              </button>
+            </div>
+            <div className="concept-selector-list">
+              {concepts.map((concept, index) => {
+                const current = concept.name === selectedName;
+                return (
+                  <button
+                    type="button"
+                    key={concept.name}
+                    className={current ? "current" : ""}
+                    aria-current={current ? "true" : undefined}
+                    onClick={() => selectConcept(concept)}
+                  >
+                    <span>{String(concept.recommendedOrder || index + 1).padStart(2, "0")}</span>
+                    <strong>{concept.name}</strong>
+                    <span className="concept-selector-meta">
+                      <span className={difficultyClass(concept.difficulty)}>
+                        {concept.difficulty}
+                      </span>
+                      {current && <span className="concept-current-label">Current</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
       <section className="concept-detail">
         {loading && (
           <div className="detail-loading">
@@ -1413,7 +1730,7 @@ export function CodeCompassApp() {
   const validationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [record, setRecord] = useState<AnalysisRecord | null>(null);
   const [view, setViewState] = useState<View>("overview");
-  const [analyzing, setAnalyzing] = useState(false);
+  const [appPhase, setAppPhase] = useState<AppPhase>("booting");
   const [stage, setStage] = useState(0);
   const [error, setError] = useState<AppFailure | null>(null);
   const [stale, setStale] = useState(false);
@@ -1434,7 +1751,7 @@ export function CodeCompassApp() {
   };
   const reset = () => {
     setRecord(null);
-    setAnalyzing(false);
+    setAppPhase("idle");
     setPreview(null);
     setValidationPhase("idle");
     setError(null);
@@ -1468,9 +1785,9 @@ export function CodeCompassApp() {
     const target = record ? `${record.meta.owner}/${record.meta.repo}` : input;
     const stopWithError = (failure: AppFailure) => {
       setError(failure);
-      if (!record) setAnalyzing(false);
+      if (!record) setAppPhase("idle");
     };
-    setAnalyzing(true);
+    setAppPhase("analyzing");
     setError(null);
     setStage(0);
     try {
@@ -1538,7 +1855,7 @@ export function CodeCompassApp() {
     setInputState(`${next.meta.owner}/${next.meta.repo}`);
     setLatestSha(sha);
     setStale(isStale);
-    setAnalyzing(false);
+    setAppPhase("ready");
     setViewState("overview");
     updateRepoUrl(next.meta, "overview");
   };
@@ -1547,11 +1864,18 @@ export function CodeCompassApp() {
     const repo = url.searchParams.get("repo");
     const requested = url.searchParams.get("view") as View | null;
     if (requested && VIEWS.some((x) => x.id === requested)) setViewState(requested);
-    if (!repo) return;
+    if (!repo) {
+      setAppPhase("idle");
+      return;
+    }
     const [owner, name] = repo.split("/");
-    if (!owner || !name) return;
+    if (!owner || !name) {
+      setError({ code: "invalid_input", message: "Enter a repository as owner/repo." });
+      setAppPhase("idle");
+      return;
+    }
     setInputState(`${owner}/${name}`);
-    setAnalyzing(true);
+    setAppPhase("restoring");
     void loadAnalysis({ data: { owner, repo: name, checkFresh: true } })
       .then((result) => {
         if (result.ok) {
@@ -1561,10 +1885,12 @@ export function CodeCompassApp() {
           setStale(
             Boolean(result.latestCommitSha && result.latestCommitSha !== result.record.commitSha),
           );
-        } else setError(result);
+          setAppPhase("ready");
+        } else {
+          setError(result);
+        }
       })
-      .catch(() => setError(SERVER_UNAVAILABLE))
-      .finally(() => setAnalyzing(false));
+      .catch(() => setError(SERVER_UNAVAILABLE));
   }, []);
   useEffect(
     () => () => {
@@ -1580,7 +1906,9 @@ export function CodeCompassApp() {
     if (!sidebarPreferenceReady) return;
     window.localStorage.setItem("codecompass-sidebar-collapsed", String(sidebarCollapsed));
   }, [sidebarCollapsed, sidebarPreferenceReady]);
-  if (!record && !analyzing)
+  if ((appPhase === "booting" || appPhase === "restoring") && !record)
+    return <RestorationState input={input || undefined} error={error} onReset={reset} />;
+  if (!record && appPhase === "idle")
     return (
       <Landing
         input={input}
@@ -1592,7 +1920,7 @@ export function CodeCompassApp() {
         onAnalyze={() => void startAnalysis()}
       />
     );
-  if (analyzing)
+  if (appPhase === "analyzing")
     return (
       <AnalysisProgress
         input={record ? `${record.meta.owner}/${record.meta.repo}` : input}
@@ -1600,7 +1928,7 @@ export function CodeCompassApp() {
         error={error}
         onRetry={() => void startAnalysis(Boolean(record))}
         onCancel={() => {
-          setAnalyzing(false);
+          setAppPhase(record ? "ready" : "idle");
           setError(null);
           if (!record) {
             setPreview(null);
