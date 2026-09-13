@@ -3511,6 +3511,44 @@ body,
   padding: 0;
 }
 
+@media (min-width: 761px) {
+  .utility-link,
+  .sidebar-foot {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    align-items: center;
+    width: 100%;
+    min-height: 42px;
+    padding: 8px 10px;
+    column-gap: 10px;
+  }
+
+  .sidebar-foot {
+    inset: auto;
+  }
+
+  .utility-link > svg,
+  .sidebar-foot > svg {
+    width: 16px;
+    height: 16px;
+    justify-self: center;
+  }
+
+  .sidebar-collapsed .utility-link,
+  .sidebar-collapsed .sidebar-foot {
+    grid-template-columns: 16px;
+    width: 44px;
+    margin-right: auto;
+    margin-left: auto;
+    padding: 0;
+    place-content: center;
+  }
+
+  .sidebar-collapsed .sidebar-foot {
+    inset: auto;
+  }
+}
+
 .sidebar-collapsed [data-tooltip]::after {
   position: absolute;
   z-index: 80;
