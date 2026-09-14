@@ -24,6 +24,7 @@ class MemoryUsageStore implements UsageStore {
   async consume(attempt: UsageAttempt): Promise<UsageDecision> {
     for (const rule of attempt.rules) {
       if (rule.scope === "ip" && !attempt.ipHash) continue;
+      if (rule.scope === "user" && !attempt.userId) continue;
       if (rule.scope === "visitor_resource" && !attempt.resourceKeyHash) {
         throw new Error("Missing resource hash");
       }
@@ -31,6 +32,7 @@ class MemoryUsageStore implements UsageStore {
         if (event.action !== attempt.action) return false;
         if (event.createdAt < this.now - rule.windowSeconds * 1000) return false;
         if (rule.scope === "visitor") return event.visitorHash === attempt.visitorHash;
+        if (rule.scope === "user") return event.userId === attempt.userId;
         if (rule.scope === "ip") return event.ipHash === attempt.ipHash;
         return (
           event.visitorHash === attempt.visitorHash &&
@@ -65,8 +67,12 @@ async function consume(
   visitorId = VISITOR_A,
   resourceKey = `resource-${store.events.length}`,
   ipAddress: string | null = IP,
+  userId: string | null = null,
 ) {
-  return enforceAiUsage({ action, visitorId, resourceKey, ipAddress }, { store, secret: SECRET });
+  return enforceAiUsage(
+    { action, visitorId, resourceKey, ipAddress, userId },
+    { store, secret: SECRET },
+  );
 }
 
 describe("CodeCompass AI usage protection", () => {
@@ -141,6 +147,24 @@ describe("CodeCompass AI usage protection", () => {
     await consume(store, "ask", VISITOR_A, "analysis-1", null);
     await consume(store, "ask", VISITOR_B, "analysis-1", null);
     expect(store.events).toHaveLength(2);
+  });
+
+  test("authenticated identity is enforced across browser visitors", async () => {
+    const store = new MemoryUsageStore();
+    const userId = "00000000-0000-4000-8000-000000000123";
+    for (let index = 0; index < 5; index++) {
+      await consume(
+        store,
+        "analyze",
+        index % 2 ? VISITOR_A : VISITOR_B,
+        `repo-${index}`,
+        null,
+        userId,
+      );
+    }
+    await expect(
+      consume(store, "analyze", "00000000-0000-4000-8000-000000000099", "repo-6", null, userId),
+    ).rejects.toMatchObject({ code: "rate_limited", limitScope: "user" });
   });
 
   test("the server-observed IP limit applies across visitors", async () => {

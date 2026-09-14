@@ -32,7 +32,15 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   AnalysisRecord,
   ArchitectureLayer,
@@ -43,6 +51,20 @@ import type {
 } from "@/lib/analysis-schema";
 import { githubFileUrl, selectedRepositoryFlow } from "@/lib/flow-utils";
 import {
+  loadLearningProgress,
+  saveCurrentRepository,
+  saveLearningProgress,
+} from "@/lib/account.functions";
+import {
+  EMPTY_PROGRESS,
+  flowStepKey,
+  mergeLearningProgress,
+  reconcileLearningProgress,
+  type LearningProgress,
+  type LearningView,
+  type SavedRepository,
+} from "@/lib/account-schema";
+import {
   askCodebase,
   collectContext,
   explainConcept,
@@ -51,14 +73,16 @@ import {
   resolveRepository,
   runAnalysis,
 } from "@/lib/codecompass.functions";
+import { AccountControl, SavedRepositoriesScreen } from "./AccountUI";
+import { useCodeCompassAuth } from "./CodeCompassAuth";
 
-type View = "overview" | "architecture" | "start" | "flow" | "concepts" | "ask";
+type View = LearningView;
 type AppFailure = {
   code: string;
   message: string;
   action?: "analyze" | "reanalyze" | "concept" | "ask";
   retryAfterSeconds?: number;
-  limitScope?: "visitor" | "ip" | "visitor_resource" | null;
+  limitScope?: "user" | "visitor" | "ip" | "visitor_resource" | null;
 };
 type ChatMessage = { role: "user" | "assistant"; content: string; referencedFiles?: string[] };
 type ValidationPhase = "idle" | "validating" | "found" | "ready";
@@ -137,6 +161,7 @@ const ERROR_TITLES: Record<string, string> = {
 };
 
 const VISITOR_STORAGE_KEY = "codecompass-anonymous-visitor";
+const PROGRESS_STORAGE_PREFIX = "codecompass-progress:";
 const VISITOR_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let memoryVisitorId: string | null = null;
 
@@ -164,6 +189,32 @@ function anonymousVisitorId(): string {
   } catch {
     memoryVisitorId = createAnonymousVisitorId();
     return memoryVisitorId;
+  }
+}
+
+function progressStorageKey(record: AnalysisRecord, userId?: string | null): string {
+  const identity = userId ? `user:${userId}` : "anonymous";
+  return `${PROGRESS_STORAGE_PREFIX}${identity}:${record.meta.owner.toLowerCase()}/${record.meta.repo.toLowerCase()}`;
+}
+
+function localProgress(record: AnalysisRecord, userId?: string | null): LearningProgress {
+  try {
+    const stored = window.localStorage.getItem(progressStorageKey(record, userId));
+    return reconcileLearningProgress(stored ? JSON.parse(stored) : null, record.analysis);
+  } catch {
+    return reconcileLearningProgress(null, record.analysis);
+  }
+}
+
+function storeLocalProgress(
+  record: AnalysisRecord,
+  progress: LearningProgress,
+  userId?: string | null,
+) {
+  try {
+    window.localStorage.setItem(progressStorageKey(record, userId), JSON.stringify(progress));
+  } catch {
+    // Progress remains available for this tab when storage is unavailable.
   }
 }
 
@@ -274,12 +325,14 @@ function RepositoryHeader({
   onMenu,
   onSwitch,
   onReanalyze,
+  onSaved,
 }: {
   record: AnalysisRecord;
   stale: boolean;
   onMenu: () => void;
   onSwitch: () => void;
   onReanalyze: () => void;
+  onSaved: () => void;
 }) {
   return (
     <header className="topbar">
@@ -319,6 +372,7 @@ function RepositoryHeader({
         <RefreshCw size={15} />
         <span className="hide-small">Re-analyze</span>
       </button>
+      <AccountControl onSaved={onSaved} />
     </header>
   );
 }
@@ -330,6 +384,7 @@ function Sidebar({
   onClose,
   collapsed,
   onToggleCollapsed,
+  onSaved,
 }: {
   view: View;
   onView: (view: View) => void;
@@ -338,6 +393,7 @@ function Sidebar({
   onClose: () => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  onSaved: () => void;
 }) {
   return (
     <>
@@ -411,6 +467,9 @@ function Sidebar({
           <CheckCircle2 size={14} />
           <small>Public repos · read-only</small>
         </div>
+        <div className="sidebar-account">
+          <AccountControl onSaved={onSaved} />
+        </div>
       </aside>
     </>
   );
@@ -424,6 +483,7 @@ function Landing({
   error,
   onPreview,
   onAnalyze,
+  onSaved,
 }: {
   input: string;
   setInput: (v: string) => void;
@@ -432,6 +492,7 @@ function Landing({
   error: AppFailure | null;
   onPreview: () => void;
   onAnalyze: () => void;
+  onSaved: () => void;
 }) {
   const examples = ["facebook/react", "supabase/supabase", "vitejs/vite"];
   const validationBusy = validationPhase === "validating" || validationPhase === "found";
@@ -458,9 +519,12 @@ function Landing({
       <header className="landing-header">
         <Logo />
         <span className="version">v1.0 MVP</span>
-        <a href="https://github.com" target="_blank" rel="noreferrer">
-          <Github size={16} /> GitHub
-        </a>
+        <div className="landing-account">
+          <a href="https://github.com" target="_blank" rel="noreferrer">
+            <Github size={16} /> GitHub
+          </a>
+          <AccountControl onSaved={onSaved} />
+        </div>
       </header>
       <section className="hero">
         <div className="hero-kicker">Repository onboarding</div>
@@ -805,7 +869,15 @@ function RepoBanner({
   );
 }
 
-function Overview({ record, onView }: { record: AnalysisRecord; onView: (v: View) => void }) {
+function Overview({
+  record,
+  onView,
+  progress,
+}: {
+  record: AnalysisRecord;
+  onView: (v: View) => void;
+  progress: LearningProgress;
+}) {
   const { analysis, snapshot, meta } = record;
   const architectureSteps = analysis.architecture.slice(0, 4);
   const firstFiles = [...analysis.importantFiles]
@@ -814,6 +886,15 @@ function Overview({ record, onView }: { record: AnalysisRecord; onView: (v: View
   const firstConcepts = [...analysis.conceptsToLearn]
     .sort((a, b) => a.recommendedOrder - b.recommendedOrder)
     .slice(0, 3);
+  const completedFlows = (analysis.flows ?? []).filter(
+    (flow) =>
+      flow.steps.length > 0 &&
+      flow.steps.every((step) =>
+        (progress.completedFlowSteps[flow.id] ?? []).includes(
+          flowStepKey(step.order, step.filePath),
+        ),
+      ),
+  ).length;
 
   return (
     <div className="view-stack overview-page">
@@ -821,6 +902,20 @@ function Overview({ record, onView }: { record: AnalysisRecord; onView: (v: View
         <h2 id="overview-project-heading">What is this project?</h2>
         <h1>{meta.repo}</h1>
         <p className="overview-summary">{conciseText(analysis.summary.whatItDoes, 180)}</p>
+        {(progress.completedFiles.length > 0 || progress.visitedConcepts.length > 0) && (
+          <div className="overview-progress" aria-label="Learning progress">
+            <span>
+              {progress.completedFiles.length} of {analysis.importantFiles.length} files read
+            </span>
+            <span>
+              {completedFlows} of {(analysis.flows ?? []).length} flows completed
+            </span>
+            <span>
+              {progress.visitedConcepts.length} of {analysis.conceptsToLearn.length} concepts
+              explored
+            </span>
+          </div>
+        )}
         <details className="technical-disclosure">
           <summary>
             <ChevronRight size={15} aria-hidden="true" />
@@ -1156,8 +1251,16 @@ function fileReadingHint(file: AnalysisRecord["analysis"]["importantFiles"][numb
   return conciseText(file.whyItMatters, 156);
 }
 
-function StartHere({ record }: { record: AnalysisRecord }) {
-  const [done, setDone] = useState<Set<string>>(new Set());
+function StartHere({
+  record,
+  progress,
+  onProgress,
+}: {
+  record: AnalysisRecord;
+  progress: LearningProgress;
+  onProgress: (progress: LearningProgress) => void;
+}) {
+  const done = new Set(progress.completedFiles);
   const files = record.analysis.importantFiles;
   return (
     <div className="view-stack">
@@ -1222,14 +1325,12 @@ function StartHere({ record }: { record: AnalysisRecord }) {
                     className="completion"
                     aria-pressed={done.has(file.path)}
                     aria-label={`${done.has(file.path) ? "Mark as incomplete" : "Mark complete"}: ${file.path}`}
-                    onClick={() =>
-                      setDone((current) => {
-                        const next = new Set(current);
-                        if (next.has(file.path)) next.delete(file.path);
-                        else next.add(file.path);
-                        return next;
-                      })
-                    }
+                    onClick={() => {
+                      const next = new Set(done);
+                      if (next.has(file.path)) next.delete(file.path);
+                      else next.add(file.path);
+                      onProgress({ ...progress, completedFiles: [...next] });
+                    }}
                   >
                     {done.has(file.path) ? <Check size={14} /> : <Circle size={14} />}
                     {done.has(file.path) ? "Completed" : "Mark complete"}
@@ -1247,13 +1348,26 @@ function StartHere({ record }: { record: AnalysisRecord }) {
 export function FollowTheFlow({
   record,
   onReanalyze,
+  progress = EMPTY_PROGRESS,
+  onProgress,
 }: {
   record: AnalysisRecord;
   onReanalyze: () => void;
+  progress?: LearningProgress;
+  onProgress?: (progress: LearningProgress) => void;
 }) {
-  const flows = record.analysis.flows ?? [];
-  const [selectedId, setSelectedId] = useState(flows[0]?.id ?? "");
+  const flows = useMemo(() => record.analysis.flows ?? [], [record.analysis.flows]);
+  const [selectedId, setSelectedId] = useState(progress.selectedFlowId ?? flows[0]?.id ?? "");
   const selected = selectedRepositoryFlow(flows, selectedId);
+  useEffect(() => {
+    if (progress.selectedFlowId && flows.some((flow) => flow.id === progress.selectedFlowId)) {
+      setSelectedId(progress.selectedFlowId);
+    }
+  }, [flows, progress.selectedFlowId]);
+  const selectFlow = (id: string) => {
+    setSelectedId(id);
+    onProgress?.({ ...progress, selectedFlowId: id });
+  };
 
   if (!selected) {
     return (
@@ -1293,7 +1407,7 @@ export function FollowTheFlow({
               key={flow.id}
               className={flow.id === selected.id ? "active" : ""}
               aria-pressed={flow.id === selected.id}
-              onClick={() => setSelectedId(flow.id)}
+              onClick={() => selectFlow(flow.id)}
             >
               <span>{String(index + 1).padStart(2, "0")}</span>
               <strong>{flow.title}</strong>
@@ -1359,6 +1473,40 @@ export function FollowTheFlow({
                       successMessage="File path copied"
                       helperText="Paste it into your editor's Quick Open or repository search."
                     />
+                    <button
+                      className="completion"
+                      type="button"
+                      aria-pressed={(progress.completedFlowSteps[selected.id] ?? []).includes(
+                        flowStepKey(step.order, step.filePath),
+                      )}
+                      onClick={() => {
+                        const key = flowStepKey(step.order, step.filePath);
+                        const completed = new Set(progress.completedFlowSteps[selected.id] ?? []);
+                        if (completed.has(key)) completed.delete(key);
+                        else completed.add(key);
+                        onProgress?.({
+                          ...progress,
+                          selectedFlowId: selected.id,
+                          completedFlowSteps: {
+                            ...progress.completedFlowSteps,
+                            [selected.id]: [...completed],
+                          },
+                        });
+                      }}
+                    >
+                      {(progress.completedFlowSteps[selected.id] ?? []).includes(
+                        flowStepKey(step.order, step.filePath),
+                      ) ? (
+                        <Check size={14} />
+                      ) : (
+                        <Circle size={14} />
+                      )}
+                      {(progress.completedFlowSteps[selected.id] ?? []).includes(
+                        flowStepKey(step.order, step.filePath),
+                      )
+                        ? "Completed"
+                        : "Mark complete"}
+                    </button>
                   </div>
                 </div>
               </article>
@@ -1376,9 +1524,19 @@ export function FollowTheFlow({
   );
 }
 
-function Concepts({ record }: { record: AnalysisRecord }) {
+function Concepts({
+  record,
+  progress,
+  onProgress,
+}: {
+  record: AnalysisRecord;
+  progress: LearningProgress;
+  onProgress: (progress: LearningProgress) => void;
+}) {
   const concepts = record.analysis.conceptsToLearn;
-  const [selectedName, setSelectedName] = useState(concepts[0]?.name ?? "");
+  const [selectedName, setSelectedName] = useState(
+    progress.selectedConcept ?? concepts[0]?.name ?? "",
+  );
   const [detail, setDetail] = useState<ConceptDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<AppFailure | null>(null);
@@ -1388,6 +1546,7 @@ function Concepts({ record }: { record: AnalysisRecord }) {
   const selectorTrigger = useRef<HTMLButtonElement>(null);
   const selectorClose = useRef<HTMLButtonElement>(null);
   const selectorSheet = useRef<HTMLDivElement>(null);
+  const trackedConcepts = useRef(new Set<string>());
   const load = useCallback(
     async (concept: ConceptToLearn) => {
       if (conceptsInFlight.current.has(concept.name)) return;
@@ -1418,17 +1577,32 @@ function Concepts({ record }: { record: AnalysisRecord }) {
     [record.analysisId],
   );
   useEffect(() => {
-    const initial = concepts[0];
+    const initial =
+      concepts.find((concept) => concept.name === progress.selectedConcept) ?? concepts[0];
     if (initial) void load(initial);
-  }, [concepts, load]);
+  }, [concepts, load, progress.selectedConcept]);
   const selected = concepts.find((x) => x.name === selectedName) ?? concepts[0];
   const selectedIndex = selected
     ? concepts.findIndex((concept) => concept.name === selected.name)
     : 0;
   const selectConcept = (concept: ConceptToLearn) => {
     setSelectorOpen(false);
+    onProgress({
+      ...progress,
+      selectedConcept: concept.name,
+      visitedConcepts: [...new Set([...progress.visitedConcepts, concept.name])],
+    });
     if (concept.name !== selectedName) void load(concept);
   };
+  useEffect(() => {
+    if (!selected || trackedConcepts.current.has(selected.name)) return;
+    trackedConcepts.current.add(selected.name);
+    onProgress({
+      ...progress,
+      selectedConcept: selected.name,
+      visitedConcepts: [...new Set([...progress.visitedConcepts, selected.name])],
+    });
+  }, [onProgress, progress, selected]);
   useEffect(() => {
     if (!selectorOpen) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -1490,7 +1664,7 @@ function Concepts({ record }: { record: AnalysisRecord }) {
                 disabled={selectedIndex <= 0}
                 onClick={() => {
                   const previous = concepts[selectedIndex - 1];
-                  if (previous) void load(previous);
+                  if (previous) selectConcept(previous);
                 }}
               >
                 <ArrowLeft size={16} /> Previous
@@ -1500,7 +1674,7 @@ function Concepts({ record }: { record: AnalysisRecord }) {
                 disabled={selectedIndex >= concepts.length - 1}
                 onClick={() => {
                   const next = concepts[selectedIndex + 1];
-                  if (next) void load(next);
+                  if (next) selectConcept(next);
                 }}
               >
                 Next <ArrowRight size={16} />
@@ -1525,7 +1699,7 @@ function Concepts({ record }: { record: AnalysisRecord }) {
               type="button"
               key={concept.name}
               className={concept.name === selectedName ? "active" : ""}
-              onClick={() => void load(concept)}
+              onClick={() => selectConcept(concept)}
             >
               <span>{String(concept.recommendedOrder).padStart(2, "0")}</span>
               <div>
@@ -1613,6 +1787,33 @@ function Concepts({ record }: { record: AnalysisRecord }) {
               </span>
               <h1>{detail.name}</h1>
               <p>{detail.whyThisRepoUsesIt}</p>
+              {selected && (
+                <button
+                  className="completion concept-completion"
+                  type="button"
+                  aria-pressed={progress.completedConcepts.includes(selected.name)}
+                  onClick={() => {
+                    const completed = new Set(progress.completedConcepts);
+                    if (completed.has(selected.name)) completed.delete(selected.name);
+                    else completed.add(selected.name);
+                    onProgress({
+                      ...progress,
+                      selectedConcept: selected.name,
+                      visitedConcepts: [...new Set([...progress.visitedConcepts, selected.name])],
+                      completedConcepts: [...completed],
+                    });
+                  }}
+                >
+                  {progress.completedConcepts.includes(selected.name) ? (
+                    <Check size={14} />
+                  ) : (
+                    <Circle size={14} />
+                  )}
+                  {progress.completedConcepts.includes(selected.name)
+                    ? "Completed"
+                    : "Mark concept complete"}
+                </button>
+              )}
             </div>
             <DetailSection title="What it is" icon={<BrainCircuit />}>
               <>
@@ -1953,6 +2154,7 @@ function updateRepoUrl(meta: RepoMeta, view: View) {
 }
 
 export function CodeCompassApp() {
+  const auth = useCodeCompassAuth();
   const [input, setInputState] = useState("");
   const [preview, setPreview] = useState<RepoMeta | null>(null);
   const [validationPhase, setValidationPhase] = useState<ValidationPhase>("idle");
@@ -1968,7 +2170,29 @@ export function CodeCompassApp() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarPreferenceReady, setSidebarPreferenceReady] = useState(false);
+  const [learningProgress, setLearningProgress] = useState<LearningProgress>(EMPTY_PROGRESS);
+  const [accountSyncKey, setAccountSyncKey] = useState<string | null>(null);
+  const [savedRepositoriesOpen, setSavedRepositoriesOpen] = useState(false);
   const analysisRequestActive = useRef(false);
+  const progressSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestedView = useRef<View | null>(null);
+
+  const updateProgress = useCallback(
+    (next: LearningProgress) => {
+      if (!record) return;
+      const reconciled = reconcileLearningProgress(next, record.analysis);
+      setLearningProgress(reconciled);
+      storeLocalProgress(record, reconciled, auth.user?.id);
+      if (auth.status !== "signed_in") return;
+      if (progressSaveTimer.current) clearTimeout(progressSaveTimer.current);
+      progressSaveTimer.current = setTimeout(() => {
+        void saveLearningProgress({
+          data: { analysisId: record.analysisId, progress: reconciled },
+        });
+      }, 500);
+    },
+    [auth.status, auth.user?.id, record],
+  );
   const setInput = (value: string) => {
     if (validationTimer.current) clearTimeout(validationTimer.current);
     setInputState(value);
@@ -1979,7 +2203,10 @@ export function CodeCompassApp() {
   };
   const setView = (next: View) => {
     setViewState(next);
-    if (record) updateRepoUrl(record.meta, next);
+    if (record) {
+      updateRepoUrl(record.meta, next);
+      updateProgress({ ...learningProgress, lastView: next });
+    }
   };
   const reset = () => {
     setRecord(null);
@@ -1990,6 +2217,9 @@ export function CodeCompassApp() {
     setUsageNotice(null);
     setStale(false);
     setLatestSha(null);
+    setLearningProgress(EMPTY_PROGRESS);
+    setAccountSyncKey(null);
+    requestedView.current = null;
     const url = new URL(window.location.href);
     url.search = "";
     window.history.pushState({}, "", url);
@@ -2101,6 +2331,8 @@ export function CodeCompassApp() {
     setInputState(`${next.meta.owner}/${next.meta.repo}`);
     setLatestSha(sha);
     setStale(isStale);
+    setLearningProgress(localProgress(next, auth.user?.id));
+    setAccountSyncKey(null);
     setAppPhase("ready");
     setViewState("overview");
     updateRepoUrl(next.meta, "overview");
@@ -2109,7 +2341,10 @@ export function CodeCompassApp() {
     const url = new URL(window.location.href);
     const repo = url.searchParams.get("repo");
     const requested = url.searchParams.get("view") as View | null;
-    if (requested && VIEWS.some((x) => x.id === requested)) setViewState(requested);
+    if (requested && VIEWS.some((x) => x.id === requested)) {
+      requestedView.current = requested;
+      setViewState(requested);
+    }
     if (!repo) {
       setAppPhase("idle");
       return;
@@ -2131,6 +2366,7 @@ export function CodeCompassApp() {
           setStale(
             Boolean(result.latestCommitSha && result.latestCommitSha !== result.record.commitSha),
           );
+          setLearningProgress(localProgress(result.record));
           setAppPhase("ready");
         } else {
           setError(result);
@@ -2138,9 +2374,51 @@ export function CodeCompassApp() {
       })
       .catch(() => setError(SERVER_UNAVAILABLE));
   }, []);
+  useEffect(() => {
+    if (!record) return;
+    if (auth.status !== "signed_in" || !auth.user) {
+      if (auth.status === "signed_out") {
+        setLearningProgress(localProgress(record));
+        setAccountSyncKey(null);
+      }
+      return;
+    }
+    const syncKey = `${auth.user.id}:${record.analysisId}`;
+    if (accountSyncKey === syncKey) return;
+    let active = true;
+    void Promise.all([
+      saveCurrentRepository({ data: { analysisId: record.analysisId } }),
+      loadLearningProgress({ data: { analysisId: record.analysisId } }),
+    ])
+      .then(async ([saved, loaded]) => {
+        if (!active) return;
+        const anonymous = localProgress(record);
+        const accountLocal = localProgress(record, auth.user?.id);
+        const remote = loaded.ok ? loaded.progress : EMPTY_PROGRESS;
+        const merged = reconcileLearningProgress(
+          mergeLearningProgress(mergeLearningProgress(remote, anonymous), accountLocal),
+          record.analysis,
+        );
+        setLearningProgress(merged);
+        storeLocalProgress(record, merged, auth.user?.id);
+        if (saved.ok && loaded.ok) {
+          await saveLearningProgress({ data: { analysisId: record.analysisId, progress: merged } });
+        }
+        if (!active) return;
+        if (!requestedView.current) setViewState(merged.lastView);
+        setAccountSyncKey(syncKey);
+      })
+      .catch(() => {
+        if (active) setAccountSyncKey(syncKey);
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountSyncKey, auth.status, auth.user, record]);
   useEffect(
     () => () => {
       if (validationTimer.current) clearTimeout(validationTimer.current);
+      if (progressSaveTimer.current) clearTimeout(progressSaveTimer.current);
     },
     [],
   );
@@ -2152,7 +2430,26 @@ export function CodeCompassApp() {
     if (!sidebarPreferenceReady) return;
     window.localStorage.setItem("codecompass-sidebar-collapsed", String(sidebarCollapsed));
   }, [sidebarCollapsed, sidebarPreferenceReady]);
-  if ((appPhase === "booting" || appPhase === "restoring") && !record)
+  if (savedRepositoriesOpen && auth.user) {
+    return (
+      <SavedRepositoriesScreen
+        onClose={() => setSavedRepositoriesOpen(false)}
+        onOpen={(repository: SavedRepository) => {
+          const url = new URL(window.location.href);
+          url.search = "";
+          url.searchParams.set("repo", `${repository.owner}/${repository.repo}`);
+          window.location.assign(url.toString());
+        }}
+      />
+    );
+  }
+  if (
+    auth.status === "restoring" ||
+    ((appPhase === "booting" || appPhase === "restoring") && !record) ||
+    (Boolean(record) &&
+      auth.status === "signed_in" &&
+      accountSyncKey !== `${auth.user?.id}:${record?.analysisId}`)
+  )
     return <RestorationState input={input || undefined} error={error} onReset={reset} />;
   if (!record && appPhase === "idle")
     return (
@@ -2164,6 +2461,7 @@ export function CodeCompassApp() {
         error={error}
         onPreview={() => void handlePreview()}
         onAnalyze={() => void startAnalysis()}
+        onSaved={() => setSavedRepositoriesOpen(true)}
       />
     );
   if (appPhase === "analyzing")
@@ -2192,6 +2490,7 @@ export function CodeCompassApp() {
         onMenu={() => setDrawerOpen(true)}
         onSwitch={reset}
         onReanalyze={() => void startAnalysis(true)}
+        onSaved={() => setSavedRepositoriesOpen(true)}
       />
       <Sidebar
         view={view}
@@ -2201,6 +2500,7 @@ export function CodeCompassApp() {
         onClose={() => setDrawerOpen(false)}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+        onSaved={() => setSavedRepositoriesOpen(true)}
       />
       <main className="app-content">
         <RepoBanner
@@ -2218,13 +2518,24 @@ export function CodeCompassApp() {
             </button>
           </div>
         )}
-        {view === "overview" && <Overview record={record} onView={setView} />}
-        {view === "architecture" && <Architecture layers={record.analysis.architecture} />}
-        {view === "start" && <StartHere record={record} />}
-        {view === "flow" && (
-          <FollowTheFlow record={record} onReanalyze={() => void startAnalysis(true)} />
+        {view === "overview" && (
+          <Overview record={record} onView={setView} progress={learningProgress} />
         )}
-        {view === "concepts" && <Concepts record={record} />}
+        {view === "architecture" && <Architecture layers={record.analysis.architecture} />}
+        {view === "start" && (
+          <StartHere record={record} progress={learningProgress} onProgress={updateProgress} />
+        )}
+        {view === "flow" && (
+          <FollowTheFlow
+            record={record}
+            onReanalyze={() => void startAnalysis(true)}
+            progress={learningProgress}
+            onProgress={updateProgress}
+          />
+        )}
+        {view === "concepts" && (
+          <Concepts record={record} progress={learningProgress} onProgress={updateProgress} />
+        )}
         {view === "ask" && <Ask record={record} />}
       </main>
     </div>

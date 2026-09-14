@@ -35,7 +35,7 @@ export interface Failure {
   message: string;
   action?: "analyze" | "reanalyze" | "concept" | "ask";
   retryAfterSeconds?: number;
-  limitScope?: "visitor" | "ip" | "visitor_resource" | null;
+  limitScope?: "user" | "visitor" | "ip" | "visitor_resource" | null;
 }
 type Result<T> = ({ ok: true } & T) | Failure;
 
@@ -77,6 +77,11 @@ async function admin() {
       "Repository storage is not configured in this environment. Connect Supabase and try again.",
     );
   }
+}
+
+async function authenticatedUserId(): Promise<string | null> {
+  const user = await (await import("./account.server")).optionalAuthenticatedUser();
+  return user?.id ?? null;
 }
 
 interface CommitInfo {
@@ -485,6 +490,7 @@ export const runAnalysis = createServerFn({ method: "POST" })
       await enforceAiUsage({
         action,
         visitorId: data.visitorId,
+        userId: await authenticatedUserId(),
         resourceKey: `${ctx.meta.owner.toLowerCase()}/${ctx.meta.repo.toLowerCase()}@${ctx.commit.sha}`,
       });
 
@@ -689,6 +695,7 @@ export const askCodebase = createServerFn({ method: "POST" })
       await enforceAiUsage({
         action: "ask",
         visitorId: data.visitorId,
+        userId: await authenticatedUserId(),
         resourceKey: data.analysisId,
       });
 
@@ -817,6 +824,7 @@ export const explainConcept = createServerFn({ method: "POST" })
       await enforceAiUsage({
         action: "concept",
         visitorId: data.visitorId,
+        userId: await authenticatedUserId(),
         resourceKey: `${data.analysisId}:${data.conceptName.toLowerCase()}`,
       });
 

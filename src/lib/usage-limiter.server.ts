@@ -13,6 +13,7 @@ const VISITOR_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]
 
 export interface UsageAttempt {
   action: AiUsageAction;
+  userId: string | null;
   visitorHash: string;
   ipHash: string | null;
   resourceKeyHash: string | null;
@@ -116,6 +117,7 @@ async function supabaseUsageStore(): Promise<UsageStore> {
     async consume(attempt) {
       const { data, error } = await supabaseAdmin.rpc("consume_ai_usage", {
         p_action: attempt.action,
+        p_user_id: attempt.userId,
         p_visitor_hash: attempt.visitorHash,
         p_ip_hash: attempt.ipHash,
         p_resource_key_hash: attempt.resourceKeyHash,
@@ -140,21 +142,27 @@ export async function enforceAiUsage(
     visitorId,
     resourceKey,
     ipAddress,
+    userId = null,
   }: {
     action: AiUsageAction;
     visitorId: string;
     resourceKey?: string;
     ipAddress?: string | null;
+    userId?: string | null;
   },
   dependencies: { store?: UsageStore; secret?: string } = {},
 ): Promise<void> {
   if (!isAnonymousVisitorId(visitorId)) {
     throw new AppError("invalid_input", "Refresh CodeCompass and try that request again.");
   }
+  if (userId && !/^[0-9a-f-]{36}$/i.test(userId)) {
+    throw new AppError("invalid_input", "Refresh CodeCompass and try that request again.");
+  }
   const secret = dependencies.secret ?? hashSecret();
   const ip = ipAddress === undefined ? observedIp() : ipAddress;
   const attempt: UsageAttempt = {
     action,
+    userId,
     visitorHash: await hashUsageIdentifier(visitorId, "visitor", secret),
     ipHash: ip ? await hashUsageIdentifier(ip, "ip", secret) : null,
     resourceKeyHash: resourceKey

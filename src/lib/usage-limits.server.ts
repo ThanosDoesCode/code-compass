@@ -1,5 +1,5 @@
 export type AiUsageAction = "analyze" | "reanalyze" | "concept" | "ask";
-export type UsageLimitScope = "visitor" | "ip" | "visitor_resource";
+export type UsageLimitScope = "user" | "visitor" | "ip" | "visitor_resource";
 
 export interface UsageRule {
   scope: UsageLimitScope;
@@ -19,6 +19,7 @@ export const AI_USAGE_LIMITS: Readonly<Record<AiUsageAction, ActionUsageLimits>>
   analyze: {
     rules: [
       { scope: "visitor_resource", windowSeconds: 10, maxRequests: 1 },
+      { scope: "user", windowSeconds: DAY, maxRequests: 5 },
       { scope: "visitor", windowSeconds: DAY, maxRequests: 5 },
       { scope: "ip", windowSeconds: DAY, maxRequests: 10 },
     ],
@@ -26,18 +27,22 @@ export const AI_USAGE_LIMITS: Readonly<Record<AiUsageAction, ActionUsageLimits>>
   reanalyze: {
     rules: [
       { scope: "visitor_resource", windowSeconds: 10 * 60, maxRequests: 1 },
+      { scope: "user", windowSeconds: DAY, maxRequests: 3 },
       { scope: "visitor", windowSeconds: DAY, maxRequests: 3 },
       { scope: "ip", windowSeconds: DAY, maxRequests: 6 },
     ],
   },
   concept: {
     rules: [
+      { scope: "user", windowSeconds: DAY, maxRequests: 20 },
       { scope: "visitor", windowSeconds: DAY, maxRequests: 20 },
       { scope: "ip", windowSeconds: DAY, maxRequests: 40 },
     ],
   },
   ask: {
     rules: [
+      { scope: "user", windowSeconds: HOUR, maxRequests: 20 },
+      { scope: "user", windowSeconds: DAY, maxRequests: 60 },
       { scope: "visitor", windowSeconds: 3, maxRequests: 1 },
       { scope: "visitor", windowSeconds: 30, maxRequests: 5 },
       { scope: "visitor", windowSeconds: HOUR, maxRequests: 20 },

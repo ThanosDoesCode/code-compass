@@ -176,7 +176,8 @@ describe("Follow the Flow", () => {
     expect(html).toContain("Choose a repository flow");
     expect(html).toContain("Public API to core");
     expect(html).toContain("Configuration to runtime");
-    expect(html.match(/aria-pressed=/g)).toHaveLength(2);
+    expect(html).toContain('class="active" aria-pressed="true"');
+    expect(html).toContain('class="" aria-pressed="false"');
   });
 
   test("switching selection is a local data operation", () => {
