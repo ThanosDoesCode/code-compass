@@ -32,11 +32,30 @@ export interface Failure {
   ok: false;
   code: string;
   message: string;
+  action?: "analyze" | "reanalyze" | "concept" | "ask";
+  retryAfterSeconds?: number;
+  limitScope?: "visitor" | "ip" | "visitor_resource" | null;
 }
 type Result<T> = ({ ok: true } & T) | Failure;
 
 function fail(e: unknown): Failure {
-  if (e instanceof AppError) return { ok: false, code: e.code, message: e.message };
+  if (e instanceof AppError) {
+    const limited = e as AppError & {
+      action?: Failure["action"];
+      retryAfterSeconds?: number;
+      limitScope?: Failure["limitScope"];
+    };
+    return {
+      ok: false,
+      code: e.code,
+      message: e.message,
+      ...(limited.action ? { action: limited.action } : {}),
+      ...(typeof limited.retryAfterSeconds === "number"
+        ? { retryAfterSeconds: limited.retryAfterSeconds }
+        : {}),
+      ...(limited.limitScope !== undefined ? { limitScope: limited.limitScope } : {}),
+    };
+  }
   console.error(e);
   return {
     ok: false,
@@ -221,9 +240,10 @@ export const resolveRepository = createServerFn({ method: "POST" })
 /* --------------------------- 3. collect repo context ----------------------- */
 
 export const collectContext = createServerFn({ method: "POST" })
-  .validator((d: { repositoryId: string; commitSha: string }) => ({
+  .validator((d: { repositoryId: string; commitSha: string; force?: boolean }) => ({
     repositoryId: String(d?.repositoryId ?? ""),
     commitSha: String(d?.commitSha ?? "").slice(0, 64),
+    force: Boolean(d?.force),
   }))
   .handler(async ({ data }): Promise<Result<{ analysisId: string; snapshot: RepoSnapshot }>> => {
     try {
@@ -238,6 +258,18 @@ export const collectContext = createServerFn({ method: "POST" })
       const meta = repoRow.metadata as unknown as RepoMeta;
       const owner = repoRow.github_owner;
       const repo = repoRow.github_repo;
+
+      const { data: existing, error: existingError } = await db
+        .from("analyses")
+        .select("id, status, context_json")
+        .eq("repository_id", data.repositoryId)
+        .eq("commit_sha", data.commitSha)
+        .maybeSingle();
+      if (existingError) throw new AppError("storage", "We could not check the analysis cache.");
+      if (!data.force && existing?.status === "complete" && existing.context_json) {
+        const existingContext = existing.context_json as unknown as RepoContext;
+        return { ok: true, analysisId: existing.id, snapshot: existingContext.snapshot };
+      }
 
       const { entries, directories, truncated } = await fetchTree(owner, repo, data.commitSha);
       if (truncated || entries.length > MAX_TREE_FILES) {
@@ -422,7 +454,11 @@ function validateStoredAnalysis(ctx: RepoContext, raw: unknown): RepoAnalysis {
 }
 
 export const runAnalysis = createServerFn({ method: "POST" })
-  .validator((d: { analysisId: string }) => ({ analysisId: String(d?.analysisId ?? "") }))
+  .validator((d: { analysisId: string; visitorId: string; force?: boolean }) => ({
+    analysisId: String(d?.analysisId ?? ""),
+    visitorId: String(d?.visitorId ?? "").slice(0, 100),
+    force: Boolean(d?.force),
+  }))
   .handler(async ({ data }): Promise<Result<{ analysis: RepoAnalysis }>> => {
     try {
       const db = await admin();
@@ -435,9 +471,17 @@ export const runAnalysis = createServerFn({ method: "POST" })
 
       const ctx = row.context_json as unknown as RepoContext | null;
       if (!ctx) throw new AppError("no_context", "The repository snapshot is missing. Re-analyze.");
-      if (row.status === "complete" && row.analysis_json) {
+      if (!data.force && row.status === "complete" && row.analysis_json) {
         return { ok: true, analysis: validateStoredAnalysis(ctx, row.analysis_json) };
       }
+
+      const action = data.force || row.analysis_json ? "reanalyze" : "analyze";
+      const { enforceAiUsage } = await import("./usage-limiter.server");
+      await enforceAiUsage({
+        action,
+        visitorId: data.visitorId,
+        resourceKey: `${ctx.meta.owner.toLowerCase()}/${ctx.meta.repo.toLowerCase()}@${ctx.commit.sha}`,
+      });
 
       const system = `${SAFETY_PREAMBLE}
 
@@ -585,11 +629,13 @@ export const askCodebase = createServerFn({ method: "POST" })
     (d: {
       analysisId: string;
       question: string;
+      visitorId: string;
       sessionId?: string | null;
       history?: { role: string; content: string }[];
     }) => ({
       analysisId: String(d?.analysisId ?? ""),
       question: String(d?.question ?? "").slice(0, 1000),
+      visitorId: String(d?.visitorId ?? "").slice(0, 100),
       sessionId: d?.sessionId ? String(d.sessionId).slice(0, 128) : null,
       history: Array.isArray(d?.history) ? d.history.slice(-8) : [],
     }),
@@ -629,7 +675,16 @@ export const askCodebase = createServerFn({ method: "POST" })
           throw new AppError("chat", "This conversation is no longer available. Start a new one.");
         }
         chatSessionId = existingSession.id;
-      } else {
+      }
+
+      const { enforceAiUsage } = await import("./usage-limiter.server");
+      await enforceAiUsage({
+        action: "ask",
+        visitorId: data.visitorId,
+        resourceKey: data.analysisId,
+      });
+
+      if (!sessionCapability) {
         sessionCapability = randomChatCapability();
         const accessTokenHash = await hashChatCapability(sessionCapability);
         const { data: session, error: sessionError } = await db
@@ -721,9 +776,10 @@ const CONCEPT_SCHEMA_TEXT = `{
 }`;
 
 export const explainConcept = createServerFn({ method: "POST" })
-  .validator((d: { analysisId: string; conceptName: string }) => ({
+  .validator((d: { analysisId: string; conceptName: string; visitorId: string }) => ({
     analysisId: String(d?.analysisId ?? ""),
     conceptName: String(d?.conceptName ?? "").slice(0, 200),
+    visitorId: String(d?.visitorId ?? "").slice(0, 100),
   }))
   .handler(async ({ data }): Promise<Result<{ detail: ConceptDetail }>> => {
     try {
@@ -748,6 +804,13 @@ export const explainConcept = createServerFn({ method: "POST" })
         const detail = validateConceptDetail(cached.content, data.conceptName);
         return { ok: true, detail: groundConceptDetail(ctx, detail) };
       }
+
+      const { enforceAiUsage } = await import("./usage-limiter.server");
+      await enforceAiUsage({
+        action: "concept",
+        visitorId: data.visitorId,
+        resourceKey: `${data.analysisId}:${data.conceptName.toLowerCase()}`,
+      });
 
       const system = `${SAFETY_PREAMBLE}
 

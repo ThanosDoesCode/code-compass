@@ -200,12 +200,52 @@ export type Database = {
         }
         Relationships: []
       }
+      usage_events: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          ip_hash: string | null
+          resource_key_hash: string | null
+          visitor_hash: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          ip_hash?: string | null
+          resource_key_hash?: string | null
+          visitor_hash: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          ip_hash?: string | null
+          resource_key_hash?: string | null
+          visitor_hash?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      consume_ai_usage: {
+        Args: {
+          p_action: string
+          p_ip_hash: string | null
+          p_resource_key_hash: string | null
+          p_rules: Json
+          p_visitor_hash: string
+        }
+        Returns: {
+          allowed: boolean
+          limit_scope: string | null
+          retry_after_seconds: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

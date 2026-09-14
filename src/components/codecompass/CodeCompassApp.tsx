@@ -51,7 +51,13 @@ import {
 } from "@/lib/codecompass.functions";
 
 type View = "overview" | "architecture" | "start" | "concepts" | "ask";
-type AppFailure = { code: string; message: string };
+type AppFailure = {
+  code: string;
+  message: string;
+  action?: "analyze" | "reanalyze" | "concept" | "ask";
+  retryAfterSeconds?: number;
+  limitScope?: "visitor" | "ip" | "visitor_resource" | null;
+};
 type ChatMessage = { role: "user" | "assistant"; content: string; referencedFiles?: string[] };
 type ValidationPhase = "idle" | "validating" | "found" | "ready";
 type AppPhase = "booting" | "idle" | "restoring" | "analyzing" | "ready";
@@ -103,6 +109,7 @@ const ERROR_TITLES: Record<string, string> = {
   private: "Private repository",
   forbidden: "Repository is not public",
   rate_limit: "GitHub rate limit reached",
+  rate_limited: "Usage limit reached",
   too_large: "Repository is too large",
   unsupported: "Unsupported repository",
   empty_repo: "Repository is empty",
@@ -126,6 +133,37 @@ const ERROR_TITLES: Record<string, string> = {
   chat: "Question could not be answered",
 };
 
+const VISITOR_STORAGE_KEY = "codecompass-anonymous-visitor";
+const VISITOR_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+let memoryVisitorId: string | null = null;
+
+function createAnonymousVisitorId(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+}
+
+function anonymousVisitorId(): string {
+  if (memoryVisitorId) return memoryVisitorId;
+  try {
+    const stored = window.localStorage.getItem(VISITOR_STORAGE_KEY);
+    if (stored && VISITOR_ID_PATTERN.test(stored)) {
+      memoryVisitorId = stored;
+      return stored;
+    }
+    const created = createAnonymousVisitorId();
+    window.localStorage.setItem(VISITOR_STORAGE_KEY, created);
+    memoryVisitorId = created;
+    return created;
+  } catch {
+    memoryVisitorId = createAnonymousVisitorId();
+    return memoryVisitorId;
+  }
+}
+
 function Logo() {
   return (
     <div className="brand" aria-label="CodeCompass">
@@ -142,6 +180,12 @@ function formatNumber(value: number) {
     notation: value > 999 ? "compact" : "standard",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function formatRetryCountdown(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`;
+  return `${Math.ceil(seconds / 3600)}h`;
 }
 function conciseText(value: string, maxLength = 124) {
   const normalized = value.trim().replace(/\s+/g, " ");
@@ -1205,11 +1249,14 @@ function Concepts({ record }: { record: AnalysisRecord }) {
   const [error, setError] = useState<AppFailure | null>(null);
   const [selectorOpen, setSelectorOpen] = useState(false);
   const requestId = useRef(0);
+  const conceptsInFlight = useRef(new Set<string>());
   const selectorTrigger = useRef<HTMLButtonElement>(null);
   const selectorClose = useRef<HTMLButtonElement>(null);
   const selectorSheet = useRef<HTMLDivElement>(null);
   const load = useCallback(
     async (concept: ConceptToLearn) => {
+      if (conceptsInFlight.current.has(concept.name)) return;
+      conceptsInFlight.current.add(concept.name);
       const currentRequest = ++requestId.current;
       setSelectedName(concept.name);
       setDetail(null);
@@ -1217,7 +1264,11 @@ function Concepts({ record }: { record: AnalysisRecord }) {
       setLoading(true);
       try {
         const result = await explainConcept({
-          data: { analysisId: record.analysisId, conceptName: concept.name },
+          data: {
+            analysisId: record.analysisId,
+            conceptName: concept.name,
+            visitorId: anonymousVisitorId(),
+          },
         });
         if (currentRequest !== requestId.current) return;
         if (result.ok) setDetail(result.detail);
@@ -1225,6 +1276,7 @@ function Concepts({ record }: { record: AnalysisRecord }) {
       } catch {
         if (currentRequest === requestId.current) setError(SERVER_UNAVAILABLE);
       } finally {
+        conceptsInFlight.current.delete(concept.name);
         if (currentRequest === requestId.current) setLoading(false);
       }
     },
@@ -1531,20 +1583,29 @@ function Ask({ record }: { record: AnalysisRecord }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<AppFailure | null>(null);
+  const [rateLimit, setRateLimit] = useState<AppFailure | null>(null);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [contextOpen, setContextOpen] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const send = async (value = question) => {
     const text = value.trim();
-    if (!text || loading) return;
+    if (!text || loading || cooldownSeconds > 0) return;
     const history = messages.map(({ role, content }) => ({ role, content }));
     setMessages((x) => [...x, { role: "user", content: text }]);
     setQuestion("");
     setError(null);
+    setRateLimit(null);
     setLoading(true);
     try {
       const result = await askCodebase({
-        data: { analysisId: record.analysisId, question: text, sessionId, history },
+        data: {
+          analysisId: record.analysisId,
+          question: text,
+          visitorId: anonymousVisitorId(),
+          sessionId,
+          history,
+        },
       });
       if (result.ok) {
         setMessages((x) => [
@@ -1552,6 +1613,14 @@ function Ask({ record }: { record: AnalysisRecord }) {
           { role: "assistant", content: result.answer, referencedFiles: result.referencedFiles },
         ]);
         setSessionId(result.sessionId);
+      } else if (result.code === "rate_limited") {
+        setMessages((current) => {
+          const last = current.at(-1);
+          return last?.role === "user" && last.content === text ? current.slice(0, -1) : current;
+        });
+        setQuestion(text);
+        setRateLimit(result);
+        setCooldownSeconds(Math.max(1, result.retryAfterSeconds ?? 1));
       } else setError(result);
     } catch {
       setError(SERVER_UNAVAILABLE);
@@ -1559,6 +1628,13 @@ function Ask({ record }: { record: AnalysisRecord }) {
       setLoading(false);
     }
   };
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+    const timer = window.setTimeout(() => {
+      setCooldownSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldownSeconds]);
   useEffect(() => {
     if (!messages.length && !loading) return;
     bottom.current?.scrollIntoView({ behavior: "smooth" });
@@ -1592,7 +1668,12 @@ function Ask({ record }: { record: AnalysisRecord }) {
               <h3>Starter questions</h3>
               <div className="starter-questions">
                 {QUESTIONS.map((x) => (
-                  <button type="button" key={x} onClick={() => void send(x)}>
+                  <button
+                    type="button"
+                    key={x}
+                    disabled={loading || cooldownSeconds > 0}
+                    onClick={() => void send(x)}
+                  >
                     {x}
                     <ArrowRight size={14} />
                   </button>
@@ -1641,6 +1722,13 @@ function Ask({ record }: { record: AnalysisRecord }) {
           {error && <ErrorNotice error={error} />}
           <div ref={bottom} />
         </div>
+        {rateLimit && cooldownSeconds > 0 && (
+          <div className="chat-rate-limit" role="status">
+            <AlertTriangle size={16} />
+            <span>{rateLimit.message}</span>
+            <small>Retry in {formatRetryCountdown(cooldownSeconds)}</small>
+          </div>
+        )}
         <form
           className="chat-form"
           onSubmit={(e: FormEvent) => {
@@ -1663,8 +1751,14 @@ function Ask({ record }: { record: AnalysisRecord }) {
           />
           <button
             className="chat-send"
-            disabled={!question.trim() || loading}
-            aria-label={loading ? "Sending question" : "Send question"}
+            disabled={!question.trim() || loading || cooldownSeconds > 0}
+            aria-label={
+              loading
+                ? "Sending question"
+                : cooldownSeconds > 0
+                  ? `Ask is temporarily limited. Retry in ${formatRetryCountdown(cooldownSeconds)}`
+                  : "Send question"
+            }
           >
             {loading ? <LoaderCircle className="spin" size={17} /> : <Send size={17} />}
           </button>
@@ -1735,15 +1829,18 @@ export function CodeCompassApp() {
   const [error, setError] = useState<AppFailure | null>(null);
   const [stale, setStale] = useState(false);
   const [latestSha, setLatestSha] = useState<string | null>(null);
+  const [usageNotice, setUsageNotice] = useState<AppFailure | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarPreferenceReady, setSidebarPreferenceReady] = useState(false);
+  const analysisRequestActive = useRef(false);
   const setInput = (value: string) => {
     if (validationTimer.current) clearTimeout(validationTimer.current);
     setInputState(value);
     setPreview(null);
     setValidationPhase("idle");
     setError(null);
+    setUsageNotice(null);
   };
   const setView = (next: View) => {
     setViewState(next);
@@ -1755,6 +1852,7 @@ export function CodeCompassApp() {
     setPreview(null);
     setValidationPhase("idle");
     setError(null);
+    setUsageNotice(null);
     setStale(false);
     setLatestSha(null);
     const url = new URL(window.location.href);
@@ -1781,15 +1879,24 @@ export function CodeCompassApp() {
     }
   };
   const startAnalysis = async (force = false) => {
-    if (!input.trim() && !record) return;
+    if ((!input.trim() && !record) || analysisRequestActive.current) return;
+    analysisRequestActive.current = true;
     const target = record ? `${record.meta.owner}/${record.meta.repo}` : input;
     const stopWithError = (failure: AppFailure) => {
+      if (failure.code === "rate_limited" && record) {
+        setError(null);
+        setUsageNotice(failure);
+        setAppPhase("ready");
+        return;
+      }
       setError(failure);
       if (!record) setAppPhase("idle");
     };
     setAppPhase("analyzing");
     setError(null);
+    setUsageNotice(null);
     setStage(0);
+    const visitorId = anonymousVisitorId();
     try {
       const resolved = await resolveRepository({ data: { input: target } });
       if (!resolved.ok) {
@@ -1818,14 +1925,16 @@ export function CodeCompassApp() {
         }
       }
       const collected = await collectContext({
-        data: { repositoryId: resolved.repositoryId, commitSha: resolved.commit.sha },
+        data: { repositoryId: resolved.repositoryId, commitSha: resolved.commit.sha, force },
       });
       if (!collected.ok) {
         stopWithError(collected);
         return;
       }
       setStage(4);
-      const analyzed = await runAnalysis({ data: { analysisId: collected.analysisId } });
+      const analyzed = await runAnalysis({
+        data: { analysisId: collected.analysisId, visitorId, force },
+      });
       if (!analyzed.ok) {
         stopWithError(analyzed);
         return;
@@ -1848,6 +1957,8 @@ export function CodeCompassApp() {
       );
     } catch {
       stopWithError(SERVER_UNAVAILABLE);
+    } finally {
+      analysisRequestActive.current = false;
     }
   };
   const finishLoad = (next: AnalysisRecord, sha: string | null, isStale: boolean) => {
@@ -1963,6 +2074,15 @@ export function CodeCompassApp() {
           latestSha={latestSha}
           onReanalyze={() => void startAnalysis(true)}
         />
+        {usageNotice && (
+          <div className="usage-notice" role="status">
+            <AlertTriangle size={16} />
+            <span>{usageNotice.message}</span>
+            <button type="button" onClick={() => setUsageNotice(null)} aria-label="Dismiss message">
+              <X size={15} />
+            </button>
+          </div>
+        )}
         {view === "overview" && <Overview record={record} onView={setView} />}
         {view === "architecture" && <Architecture layers={record.analysis.architecture} />}
         {view === "start" && <StartHere record={record} />}
