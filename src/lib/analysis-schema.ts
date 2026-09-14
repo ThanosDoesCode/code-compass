@@ -42,12 +42,32 @@ export interface ConceptToLearn {
   recommendedOrder: number;
 }
 
+export interface RepositoryFlowStep {
+  order: number;
+  label: string;
+  filePath: string;
+  explanation: string;
+  whatToNotice: string;
+  nextReason?: string;
+  concepts?: string[];
+}
+
+export interface RepositoryFlow {
+  id: string;
+  title: string;
+  summary: string;
+  difficulty: Difficulty;
+  steps: RepositoryFlowStep[];
+}
+
 export interface RepoAnalysis {
   summary: AnalysisSummary;
   technologies: TechnologyItem[];
   architecture: ArchitectureLayer[];
   importantFiles: ImportantFile[];
   conceptsToLearn: ConceptToLearn[];
+  /** Optional so analyses cached before flow mapping was introduced remain valid. */
+  flows?: RepositoryFlow[];
 }
 
 export interface ConceptDetail {
@@ -102,11 +122,63 @@ export interface AnalysisRecord {
 
 const DIFFICULTIES: Difficulty[] = ["beginner", "intermediate", "advanced"];
 
+interface ModelObject extends Record<string, unknown> {
+  architecture?: unknown;
+  beginnerExplanation?: unknown;
+  beginnerMentalModel?: unknown;
+  category?: unknown;
+  code?: unknown;
+  codeSnippet?: unknown;
+  commonMisconception?: unknown;
+  comprehensionQuestion?: unknown;
+  concepts?: unknown;
+  conceptsToLearn?: unknown;
+  connectsTo?: unknown;
+  description?: unknown;
+  difficulty?: unknown;
+  explanation?: unknown;
+  filePath?: unknown;
+  filename?: unknown;
+  flows?: unknown;
+  id?: unknown;
+  importantFiles?: unknown;
+  label?: unknown;
+  name?: unknown;
+  nextReason?: unknown;
+  order?: unknown;
+  path?: unknown;
+  prerequisites?: unknown;
+  projectType?: unknown;
+  recommendedOrder?: unknown;
+  relatedFiles?: unknown;
+  relevantFiles?: unknown;
+  roleInRepository?: unknown;
+  steps?: unknown;
+  summary?: unknown;
+  technologies?: unknown;
+  title?: unknown;
+  whatItDoes?: unknown;
+  whatIsIt?: unknown;
+  whatToNotice?: unknown;
+  whereItAppears?: unknown;
+  whoItsFor?: unknown;
+  whyDoesItExist?: unknown;
+  whyItMatters?: unknown;
+  whyItMattersHere?: unknown;
+  whyThisRepoUsesIt?: unknown;
+}
+
 function str(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
 }
 function strArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 24) : [];
+}
+function objectValue(v: unknown): ModelObject {
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as ModelObject) : {};
+}
+function arrayValue(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : [];
 }
 function difficulty(v: unknown): Difficulty {
   const s = str(v).toLowerCase() as Difficulty;
@@ -123,8 +195,8 @@ function slug(s: string, i: number) {
 /** Validates + normalizes untrusted model output into a stable shape. */
 export function validateAnalysis(raw: unknown): RepoAnalysis {
   if (!raw || typeof raw !== "object") throw new Error("Analysis response was not an object");
-  const r = raw as any;
-  const s = (r.summary ?? {}) as any;
+  const r = objectValue(raw);
+  const s = objectValue(r.summary);
 
   const summary: AnalysisSummary = {
     whatItDoes: str(s.whatItDoes),
@@ -134,11 +206,9 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
   };
   if (!summary.whatItDoes) throw new Error("Analysis is missing a project summary");
 
-  const technologies: TechnologyItem[] = (
-    (Array.isArray(r.technologies) ? r.technologies : []) as any[]
-  )
+  const technologies: TechnologyItem[] = arrayValue(r.technologies)
     .map((t) => {
-      const o = (t ?? {}) as any;
+      const o = objectValue(t);
       return {
         name: str(o.name),
         category: str(o.category, "Other"),
@@ -148,11 +218,9 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
     .filter((t) => t.name)
     .slice(0, 40);
 
-  const architecture: ArchitectureLayer[] = (
-    (Array.isArray(r.architecture) ? r.architecture : []) as any[]
-  )
+  const architecture: ArchitectureLayer[] = arrayValue(r.architecture)
     .map((a, i) => {
-      const o = (a ?? {}) as any;
+      const o = objectValue(a);
       const name = str(o.name);
       return {
         id: str(o.id) || slug(name, i),
@@ -166,11 +234,9 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
     .filter((a) => a.name)
     .slice(0, 12);
 
-  const importantFiles: ImportantFile[] = (
-    (Array.isArray(r.importantFiles) ? r.importantFiles : []) as any[]
-  )
+  const importantFiles: ImportantFile[] = arrayValue(r.importantFiles)
     .map((f, i) => {
-      const o = (f ?? {}) as any;
+      const o = objectValue(f);
       const path = str(o.path);
       return {
         path,
@@ -187,11 +253,9 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
     .sort((a, b) => a.recommendedOrder - b.recommendedOrder)
     .slice(0, 15);
 
-  const conceptsToLearn: ConceptToLearn[] = (
-    (Array.isArray(r.conceptsToLearn) ? r.conceptsToLearn : []) as any[]
-  )
+  const conceptsToLearn: ConceptToLearn[] = arrayValue(r.conceptsToLearn)
     .map((c, i) => {
-      const o = (c ?? {}) as any;
+      const o = objectValue(c);
       return {
         name: str(o.name),
         whyItMattersHere: str(o.whyItMattersHere),
@@ -205,16 +269,74 @@ export function validateAnalysis(raw: unknown): RepoAnalysis {
     .sort((a, b) => a.recommendedOrder - b.recommendedOrder)
     .slice(0, 12);
 
+  const flows: RepositoryFlow[] | undefined = Array.isArray(r.flows)
+    ? r.flows
+        .map((flow, flowIndex) => {
+          const o = objectValue(flow);
+          const title = str(o.title);
+          const steps: RepositoryFlowStep[] = arrayValue(o.steps)
+            .map((step, stepIndex) => {
+              const item = objectValue(step);
+              const nextReason = str(item.nextReason);
+              return {
+                order: typeof item.order === "number" ? item.order : stepIndex + 1,
+                label: str(item.label),
+                filePath: str(item.filePath),
+                explanation: str(item.explanation),
+                whatToNotice: str(item.whatToNotice),
+                ...(nextReason ? { nextReason } : {}),
+                concepts: strArray(item.concepts),
+              };
+            })
+            .filter((step) => step.label && step.filePath && step.explanation)
+            .sort((a, b) => a.order - b.order)
+            .slice(0, 6);
+          return {
+            id: str(o.id) || slug(title, flowIndex),
+            title,
+            summary: str(o.summary),
+            difficulty: difficulty(o.difficulty),
+            steps,
+          };
+        })
+        .filter((flow) => flow.title && flow.summary && flow.steps.length >= 2)
+        .slice(0, 3)
+    : undefined;
+
   if (!architecture.length) throw new Error("Analysis is missing architecture layers");
   if (!importantFiles.length) throw new Error("Analysis is missing important files");
 
-  return { summary, technologies, architecture, importantFiles, conceptsToLearn };
+  return {
+    summary,
+    technologies,
+    architecture,
+    importantFiles,
+    conceptsToLearn,
+    ...(flows ? { flows } : {}),
+  };
+}
+
+/** Removes untrusted flow steps that do not reference files whose contents were collected. */
+export function groundRepositoryFlows(
+  flows: RepositoryFlow[] | undefined,
+  availablePaths: Iterable<string>,
+): RepositoryFlow[] | undefined {
+  if (!flows) return undefined;
+  const paths = new Set(availablePaths);
+  return flows
+    .map((flow) => ({
+      ...flow,
+      steps: flow.steps
+        .filter((step) => paths.has(step.filePath))
+        .map((step, index) => ({ ...step, order: index + 1 })),
+    }))
+    .filter((flow) => flow.steps.length >= 2);
 }
 
 export function validateConceptDetail(raw: unknown, name: string): ConceptDetail {
   if (!raw || typeof raw !== "object") throw new Error("Concept response was not an object");
-  const o = raw as any;
-  const snip = (o.codeSnippet ?? null) as any | null;
+  const o = objectValue(raw);
+  const snip = objectValue(o.codeSnippet);
   const detail: ConceptDetail = {
     name: str(o.name, name),
     whatIsIt: str(o.whatIsIt),

@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 
 import {
   parseRepoInput,
+  groundRepositoryFlows,
   validateAnalysis,
   validateConceptDetail,
   type AnalysisRecord,
@@ -373,7 +374,8 @@ const ANALYSIS_SCHEMA_TEXT = `{
   "technologies": [ { "name": "", "category": "", "roleInRepository": "" } ],
   "architecture": [ { "id": "", "name": "", "description": "", "relatedFiles": [], "connectsTo": [], "concepts": [] } ],
   "importantFiles": [ { "path": "", "filename": "", "category": "", "whyItMatters": "", "beginnerExplanation": "", "difficulty": "beginner | intermediate | advanced", "recommendedOrder": 1, "concepts": [] } ],
-  "conceptsToLearn": [ { "name": "", "whyItMattersHere": "", "prerequisites": [], "relatedFiles": [], "difficulty": "beginner | intermediate | advanced", "recommendedOrder": 1 } ]
+  "conceptsToLearn": [ { "name": "", "whyItMattersHere": "", "prerequisites": [], "relatedFiles": [], "difficulty": "beginner | intermediate | advanced", "recommendedOrder": 1 } ],
+  "flows": [ { "id": "", "title": "", "summary": "", "difficulty": "beginner | intermediate | advanced", "steps": [ { "order": 1, "label": "", "filePath": "", "explanation": "", "whatToNotice": "", "nextReason": "", "concepts": [] } ] } ]
 }`;
 
 function contextBlock(ctx: RepoContext): string {
@@ -408,6 +410,8 @@ function contextPaths(ctx: RepoContext): Set<string> {
 /** Enforce path and connection grounding independently of model instructions. */
 function groundAnalysis(ctx: RepoContext, analysis: RepoAnalysis): RepoAnalysis {
   const paths = contextPaths(ctx);
+  const collectedPaths = [...ctx.manifests, ...ctx.files].map((file) => file.path);
+  const flows = groundRepositoryFlows(analysis.flows, collectedPaths);
   const layerIds = new Set(analysis.architecture.map((layer) => layer.id));
   const grounded: RepoAnalysis = {
     ...analysis,
@@ -421,6 +425,7 @@ function groundAnalysis(ctx: RepoContext, analysis: RepoAnalysis): RepoAnalysis 
       ...concept,
       relatedFiles: concept.relatedFiles.filter((path) => paths.has(path)),
     })),
+    ...(flows ? { flows } : {}),
   };
   if (!grounded.importantFiles.length) {
     throw new AppError("ai_malformed", "The AI analysis did not reference valid repository files.");
@@ -493,6 +498,9 @@ ${ANALYSIS_SCHEMA_TEXT}
 - "architecture": 3 to 6 layers that reflect THIS repository, not a generic template. "connectsTo" holds ids of other layers in the same array.
 - "importantFiles": 5 to 8 real paths taken verbatim from the provided tree or files, ordered 1..n as a reading plan from bootstrap to data.
 - "conceptsToLearn": 3 to 6 software engineering concepts a junior developer must grasp to work in THIS repository, ordered by dependency.
+- "flows": zero to 3 concise execution, data, or control flows that help a learner follow real behavior through THIS repository. Prefer useful paths such as public API to implementation, user action to state/render, CLI input to execution, configuration to runtime, or exported function to result—only when supported by the provided files.
+- Each flow contains 2 to 6 ordered steps. Every "filePath" must be a path whose FILE contents are included below, not merely a path from the tree. "explanation" says what happens in that file; "whatToNotice" tells a beginner what code to look for; "nextReason" explains the grounded transition to the following step and must be an empty string on the final step.
+- Do not force request/HTTP terminology onto repositories where it does not apply. If no trustworthy multi-file flow can be established from the provided contents, return an empty "flows" array.
 - Write plainly for someone who has never seen this codebase. No hype, no filler.
 - Every path you mention must exist in the provided context.`;
 

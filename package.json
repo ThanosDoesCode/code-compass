@@ -9,6 +9,7 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "test:usage": "bun test tests/usage-limiter.test.ts",
+    "test:flow": "bun test tests/follow-flow.test.tsx",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

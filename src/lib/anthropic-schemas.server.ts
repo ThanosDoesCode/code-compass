@@ -100,8 +100,57 @@ export const ANALYSIS_OUTPUT_SCHEMA = {
         ],
       },
     },
+    flows: {
+      type: "array",
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          id: stringSchema,
+          title: stringSchema,
+          summary: stringSchema,
+          difficulty: difficultySchema,
+          steps: {
+            type: "array",
+            minItems: 2,
+            maxItems: 6,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                order: { type: "integer" },
+                label: stringSchema,
+                filePath: stringSchema,
+                explanation: stringSchema,
+                whatToNotice: stringSchema,
+                nextReason: stringSchema,
+                concepts: stringArraySchema,
+              },
+              required: [
+                "order",
+                "label",
+                "filePath",
+                "explanation",
+                "whatToNotice",
+                "nextReason",
+                "concepts",
+              ],
+            },
+          },
+        },
+        required: ["id", "title", "summary", "difficulty", "steps"],
+      },
+    },
   },
-  required: ["summary", "technologies", "architecture", "importantFiles", "conceptsToLearn"],
+  required: [
+    "summary",
+    "technologies",
+    "architecture",
+    "importantFiles",
+    "conceptsToLearn",
+    "flows",
+  ],
 } as const;
 
 /** Strict Anthropic structured-output schema for a concept deep dive. */

@@ -24,6 +24,7 @@ import {
   Network,
   PanelLeftClose,
   RefreshCw,
+  Route,
   Search,
   Send,
   Sparkles,
@@ -40,6 +41,7 @@ import type {
   Difficulty,
   RepoMeta,
 } from "@/lib/analysis-schema";
+import { githubFileUrl, selectedRepositoryFlow } from "@/lib/flow-utils";
 import {
   askCodebase,
   collectContext,
@@ -50,7 +52,7 @@ import {
   runAnalysis,
 } from "@/lib/codecompass.functions";
 
-type View = "overview" | "architecture" | "start" | "concepts" | "ask";
+type View = "overview" | "architecture" | "start" | "flow" | "concepts" | "ask";
 type AppFailure = {
   code: string;
   message: string;
@@ -65,6 +67,7 @@ const VIEWS: { id: View; label: string; icon: typeof Boxes }[] = [
   { id: "overview", label: "Overview", icon: Boxes },
   { id: "architecture", label: "Architecture", icon: Network },
   { id: "start", label: "Start Here", icon: BookOpen },
+  { id: "flow", label: "Follow the Flow", icon: Route },
   { id: "concepts", label: "Concepts", icon: BrainCircuit },
   { id: "ask", label: "Ask", icon: MessageSquareText },
 ];
@@ -1200,7 +1203,7 @@ function StartHere({ record }: { record: AnalysisRecord }) {
                 <div className="file-actions">
                   <a
                     className="quiet-button"
-                    href={`${record.meta.htmlUrl}/blob/${record.commitSha}/${file.path}`}
+                    href={githubFileUrl(record.meta.htmlUrl, record.commitSha, file.path)}
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={`View ${file.path} on GitHub`}
@@ -1236,6 +1239,138 @@ function StartHere({ record }: { record: AnalysisRecord }) {
             </article>
           ))}
         </div>
+      </section>
+    </div>
+  );
+}
+
+export function FollowTheFlow({
+  record,
+  onReanalyze,
+}: {
+  record: AnalysisRecord;
+  onReanalyze: () => void;
+}) {
+  const flows = record.analysis.flows ?? [];
+  const [selectedId, setSelectedId] = useState(flows[0]?.id ?? "");
+  const selected = selectedRepositoryFlow(flows, selectedId);
+
+  if (!selected) {
+    return (
+      <div className="view-stack flow-view">
+        <PageHeading
+          kicker="Follow the Flow"
+          title="Follow the Flow"
+          text="See how real behavior moves through this repository."
+        />
+        <section className="flow-empty" aria-labelledby="flow-empty-title">
+          <Route size={24} />
+          <div>
+            <h2 id="flow-empty-title">Flow mapping isn’t available for this saved analysis yet.</h2>
+            <p>Re-analyze the repository to add grounded execution and data-flow guidance.</p>
+          </div>
+          <button className="primary-button" type="button" onClick={onReanalyze}>
+            <RefreshCw size={16} /> Re-analyze repository
+          </button>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="view-stack flow-view">
+      <PageHeading
+        kicker="Follow the Flow"
+        title="Follow the Flow"
+        text="See how real behavior moves through this repository."
+      />
+
+      {flows.length > 1 && (
+        <div className="flow-selector" role="group" aria-label="Choose a repository flow">
+          {flows.map((flow, index) => (
+            <button
+              type="button"
+              key={flow.id}
+              className={flow.id === selected.id ? "active" : ""}
+              aria-pressed={flow.id === selected.id}
+              onClick={() => setSelectedId(flow.id)}
+            >
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <strong>{flow.title}</strong>
+              <small>{flow.difficulty}</small>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <section className="flow-learning-guide" aria-labelledby="selected-flow-title">
+        <header className="flow-introduction">
+          <div>
+            <span className="eyebrow">What you’ll understand</span>
+            <h2 id="selected-flow-title">{selected.title}</h2>
+            <p>{selected.summary}</p>
+          </div>
+          <span className={difficultyClass(selected.difficulty)}>{selected.difficulty}</span>
+        </header>
+
+        <ol className="flow-steps">
+          {selected.steps.map((step, index) => (
+            <li key={`${selected.id}-${step.order}-${step.filePath}`}>
+              <article className="flow-step">
+                <span className="flow-step-number">{String(index + 1).padStart(2, "0")}</span>
+                <div className="flow-step-content">
+                  <div className="flow-step-heading">
+                    <div>
+                      <h3>{step.label}</h3>
+                      <code title={step.filePath}>{step.filePath}</code>
+                    </div>
+                  </div>
+                  <div className="flow-step-guidance">
+                    <section>
+                      <h4>What happens here</h4>
+                      <p>{step.explanation}</p>
+                    </section>
+                    {step.whatToNotice && (
+                      <section>
+                        <h4>What to notice</h4>
+                        <p>{step.whatToNotice}</p>
+                      </section>
+                    )}
+                  </div>
+                  {step.concepts?.length ? (
+                    <div className="flow-concepts" aria-label="Related concepts">
+                      {step.concepts.slice(0, 4).map((concept) => (
+                        <span key={concept}>{concept}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="flow-step-actions">
+                    <a
+                      className="quiet-button"
+                      href={githubFileUrl(record.meta.htmlUrl, record.commitSha, step.filePath)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink size={14} /> View on GitHub
+                    </a>
+                    <CopyButton
+                      value={step.filePath}
+                      label="Copy file path"
+                      successMessage="File path copied"
+                      helperText="Paste it into your editor's Quick Open or repository search."
+                    />
+                  </div>
+                </div>
+              </article>
+              {index < selected.steps.length - 1 && (
+                <div className="flow-transition">
+                  <span aria-hidden="true" />
+                  {step.nextReason && <p>{step.nextReason}</p>}
+                </div>
+              )}
+            </li>
+          ))}
+        </ol>
       </section>
     </div>
   );
@@ -2086,6 +2221,9 @@ export function CodeCompassApp() {
         {view === "overview" && <Overview record={record} onView={setView} />}
         {view === "architecture" && <Architecture layers={record.analysis.architecture} />}
         {view === "start" && <StartHere record={record} />}
+        {view === "flow" && (
+          <FollowTheFlow record={record} onReanalyze={() => void startAnalysis(true)} />
+        )}
         {view === "concepts" && <Concepts record={record} />}
         {view === "ask" && <Ask record={record} />}
       </main>
