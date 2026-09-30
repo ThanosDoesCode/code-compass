@@ -8,3 +8,5 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- Browser auth URL/publishable key fall back to hardcoded public values in src/lib/public-auth-config.ts; the publish build environment did not inject VITE_SUPABASE_*.
