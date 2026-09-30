@@ -679,7 +679,7 @@ export const askCodebase = createServerFn({ method: "POST" })
         const { data: existingSession, error: sessionLookupError } = await db
           .from("chat_sessions")
           .select("id")
-          .eq("access_token_hash", accessTokenHash)
+          .eq("access_token_hash" as "id", accessTokenHash)
           .eq("analysis_id", row.id)
           .maybeSingle();
         if (sessionLookupError) {
@@ -708,7 +708,7 @@ export const askCodebase = createServerFn({ method: "POST" })
             repository_id: row.repository_id,
             analysis_id: row.id,
             access_token_hash: accessTokenHash,
-          })
+          } as never)
           .select("id")
           .single();
         if (sessionError) throw new AppError("storage", "We could not start this conversation.");
