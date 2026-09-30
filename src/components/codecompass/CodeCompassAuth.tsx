@@ -1,4 +1,5 @@
 import type { Session, User } from "@supabase/supabase-js";
+import { reportAuthError } from "@/lib/auth-errors";
 import { Github, LoaderCircle, LogIn, UserPlus, X } from "lucide-react";
 import {
   createContext,
@@ -87,21 +88,6 @@ export function useCodeCompassAuth(): AuthContextValue {
   return context;
 }
 
-function friendlyAuthError(error: unknown): string {
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-  if (message.includes("invalid login") || message.includes("invalid credentials")) {
-    return "The email or password is incorrect.";
-  }
-  if (message.includes("already registered") || message.includes("already exists")) {
-    return "An account already exists for this email.";
-  }
-  if (message.includes("rate") || message.includes("too many")) {
-    return "Too many attempts. Please wait a moment and try again.";
-  }
-  if (message.includes("expired")) return "This link has expired. Request a new one.";
-  return "Account access failed. Check your details and try again.";
-}
-
 export function AuthDialog({
   initialMode,
   onClose,
@@ -168,7 +154,18 @@ export function AuthDialog({
         setSuccess("Password updated. You can continue using CodeCompass.");
       }
     } catch (authError) {
-      setError(friendlyAuthError(authError));
+      setError(
+        reportAuthError(
+          mode === "sign_up"
+            ? "signup"
+            : mode === "sign_in"
+              ? "signin"
+              : mode === "forgot"
+                ? "reset_email"
+                : "reset_password",
+          authError,
+        ),
+      );
     } finally {
       setBusy(false);
     }
@@ -188,7 +185,7 @@ export function AuthDialog({
       });
       if (authError) throw authError;
     } catch (authError) {
-      setError(friendlyAuthError(authError));
+      setError(reportAuthError("github", authError));
       setBusy(false);
     }
   };
