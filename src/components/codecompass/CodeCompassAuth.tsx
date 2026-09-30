@@ -263,6 +263,35 @@ export function AuthDialog({
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />
+              {(mode === "sign_up" || mode === "reset") && (
+                <button
+                  type="button"
+                  className="auth-generate"
+                  onClick={() => {
+                    const chars =
+                      "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*-_=+?";
+                    const bytes = crypto.getRandomValues(new Uint32Array(20));
+                    const pw = Array.from(bytes, (b) => chars[b % chars.length]).join("");
+                    setPassword(pw);
+                    setConfirmPassword(pw);
+                    void navigator.clipboard?.writeText(pw).catch(() => {});
+                    setSuccess("Strong password created and copied to your clipboard.");
+                  }}
+                  style={{
+                    alignSelf: "flex-start",
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    marginTop: 6,
+                    fontSize: 12,
+                    color: "var(--primary, currentColor)",
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                  }}
+                >
+                  Generate strong password
+                </button>
+              )}
             </label>
           )}
           {(mode === "sign_up" || mode === "reset") && (
