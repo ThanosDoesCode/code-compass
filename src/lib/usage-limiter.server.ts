@@ -117,10 +117,10 @@ async function supabaseUsageStore(): Promise<UsageStore> {
     async consume(attempt) {
       const { data, error } = await supabaseAdmin.rpc("consume_ai_usage", {
         p_action: attempt.action,
-        p_user_id: attempt.userId,
-        p_visitor_hash: attempt.visitorHash,
-        p_ip_hash: attempt.ipHash,
-        p_resource_key_hash: attempt.resourceKeyHash,
+        p_user_id: attempt.userId as string,
+        p_visitor_hash: attempt.visitorHash as string,
+        p_ip_hash: attempt.ipHash as string,
+        p_resource_key_hash: attempt.resourceKeyHash as string,
         p_rules: attempt.rules as unknown as Json,
       });
       const result = data?.[0];
