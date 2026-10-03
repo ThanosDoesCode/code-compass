@@ -11,12 +11,21 @@ export class AppError extends Error {
   }
 }
 
+function ghHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": UA,
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const token = process.env["GITHUB_TOKEN"];
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
 async function gh(path: string): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(`${GH}${path}`, {
-      headers: { Accept: "application/vnd.github+json", "User-Agent": UA },
-    });
+    res = await fetch(`${GH}${path}`, { headers: ghHeaders() });
   } catch {
     throw new AppError("network", "We could not reach GitHub. Check your connection and retry.");
   }
@@ -28,11 +37,22 @@ async function gh(path: string): Promise<Response> {
   }
   if (res.status === 403 || res.status === 429) {
     const remaining = res.headers.get("x-ratelimit-remaining");
-    if (remaining === "0") {
-      throw new AppError(
+    const reset = Number(res.headers.get("x-ratelimit-reset") ?? "");
+    const retryAfter = Number(res.headers.get("retry-after") ?? "");
+    let seconds: number | null = null;
+    if (Number.isFinite(retryAfter) && retryAfter > 0) seconds = retryAfter;
+    else if (Number.isFinite(reset) && reset > 0)
+      seconds = Math.max(1, Math.ceil(reset - Date.now() / 1000));
+    if (remaining === "0" || res.status === 429 || retryAfter > 0) {
+      const mins = seconds ? Math.ceil(seconds / 60) : null;
+      const err = new AppError(
         "rate_limit",
-        "GitHub's hourly rate limit was reached. Please try again in a little while.",
-      );
+        mins
+          ? `GitHub's rate limit was reached. Try again in about ${mins} minute${mins === 1 ? "" : "s"}.`
+          : "GitHub's rate limit was reached. Please try again shortly.",
+      ) as AppError & { retryAfterSeconds?: number };
+      if (seconds) err.retryAfterSeconds = seconds;
+      throw err;
     }
     throw new AppError("forbidden", "GitHub refused this request. The repository may be private.");
   }
