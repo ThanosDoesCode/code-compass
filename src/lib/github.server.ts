@@ -18,7 +18,7 @@ function ghHeaders(): Record<string, string> {
     "X-GitHub-Api-Version": "2022-11-28",
   };
   const token = process.env["GITHUB_TOKEN"];
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }
 
